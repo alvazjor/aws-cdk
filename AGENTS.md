@@ -326,3 +326,5 @@ Required for: new CFN resource types, new CFN properties, cross-service integrat
 
 All code is TypeScript compiled via [jsii](https://github.com/aws/jsii/) to other languages.
 Every public API must be jsii-compatible.
+
+<!-- v2 v2-T7 add AGENTS.md -->
