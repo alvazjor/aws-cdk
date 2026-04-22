@@ -2131,3 +2131,5 @@ Use the following JSDoc tags: **@param**, **@returns**, **@default**, **@see**,
 * **Semicolons**: at the end of each code statement and declaration
   (incl. properties and imports).
 * **Comments**: start with lower-case, end with a period.
+
+<!-- test test/t2-design-guidelines -->
