@@ -1,11 +1,15 @@
-import { Construct, IConstruct } from 'constructs';
+import type { IConstruct } from 'constructs';
+import { Construct } from 'constructs';
 import { NotificationsResourceHandler } from './notifications-resource-handler';
 import * as iam from '../../../aws-iam';
 import * as cdk from '../../../core';
 import { ValidationError } from '../../../core/lib/errors';
+import { lit } from '../../../core/lib/private/literal-string';
 import * as cxapi from '../../../cx-api';
-import { Bucket, IBucket, EventType, NotificationKeyFilter } from '../bucket';
-import { BucketNotificationDestinationType, IBucketNotificationDestination } from '../destination';
+import type { IBucket, EventType, NotificationKeyFilter } from '../bucket';
+import { Bucket } from '../bucket';
+import type { IBucketNotificationDestination } from '../destination';
+import { BucketNotificationDestinationType } from '../destination';
 
 interface NotificationsProps {
   /**
@@ -82,7 +86,7 @@ export class BucketNotifications extends Construct {
       resource.node.addDependency(...targetProps.dependencies);
     }
 
-    // based on the target type, add the the correct configurations array
+    // based on the target type, add the correct configurations array
     switch (targetProps.type) {
       case BucketNotificationDestinationType.LAMBDA:
         this.lambdaNotifications.push({ ...commonConfig, LambdaFunctionArn: targetProps.arn });
@@ -97,7 +101,7 @@ export class BucketNotifications extends Construct {
         break;
 
       default:
-        throw new ValidationError('Unsupported notification target type:' + BucketNotificationDestinationType[targetProps.type], this);
+        throw new ValidationError(lit`UnsupportedNotificationTargetType`, 'Unsupported notification target type:' + BucketNotificationDestinationType[targetProps.type], this);
     }
   }
 
@@ -135,12 +139,8 @@ export class BucketNotifications extends Construct {
         managed = false;
       }
 
-      if (!managed) {
-        handler.addToRolePolicy(new iam.PolicyStatement({
-          actions: ['s3:GetBucketNotification'],
-          resources: ['*'],
-        }));
-      }
+      // Add permissions for this bucket to the handler
+      this.addHandlerPermissions(handler, managed);
 
       this.resource = new cdk.CfnResource(this, 'Resource', {
         type: 'Custom::S3BucketNotifications',
@@ -170,6 +170,34 @@ export class BucketNotifications extends Construct {
 
     return this.resource;
   }
+
+  /**
+   * Add scoped permissions for managing bucket notifications to the handler's role.
+   *
+   * Grants specific IAM permissions to the bucket ARN instead of using wildcard permissions.
+   * This implements the principle of least privilege by limiting the handler's access to only
+   * the buckets it needs to manage.
+   *
+   * @param handler The notifications resource handler
+   * @param managed Whether this is a managed (CDK-created) bucket
+   */
+  private addHandlerPermissions(handler: NotificationsResourceHandler, managed: boolean): void {
+    // All buckets need PutBucketNotification to set/update notification configurations
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['s3:PutBucketNotification'],
+      resources: [this.bucket.bucketArn],
+    }));
+
+    // Unmanaged (imported) buckets need GetBucketNotification to read existing configurations
+    // before merging with new notifications. Managed buckets don't need this since CDK
+    // controls their complete notification state from creation.
+    if (!managed) {
+      handler.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['s3:GetBucketNotification'],
+        resources: [this.bucket.bucketArn],
+      }));
+    }
+  }
 }
 
 function renderFilters(filters: NotificationKeyFilter[], scope: BucketNotifications): Filter | undefined {
@@ -183,12 +211,12 @@ function renderFilters(filters: NotificationKeyFilter[], scope: BucketNotificati
 
   for (const rule of filters) {
     if (!rule.suffix && !rule.prefix) {
-      throw new ValidationError('NotificationKeyFilter must specify `prefix` and/or `suffix`', scope);
+      throw new ValidationError(lit`NotificationKeyFilterMustSpecifyPrefixOrSuffix`, 'NotificationKeyFilter must specify `prefix` and/or `suffix`', scope);
     }
 
     if (rule.suffix) {
       if (hasSuffix) {
-        throw new ValidationError('Cannot specify more than one suffix rule in a filter.', scope);
+        throw new ValidationError(lit`CannotSpecifyMultipleSuffixRules`, 'Cannot specify more than one suffix rule in a filter.', scope);
       }
       renderedRules.push({ Name: 'suffix', Value: rule.suffix });
       hasSuffix = true;
@@ -196,7 +224,7 @@ function renderFilters(filters: NotificationKeyFilter[], scope: BucketNotificati
 
     if (rule.prefix) {
       if (hasPrefix) {
-        throw new ValidationError('Cannot specify more than one prefix rule in a filter.', scope);
+        throw new ValidationError(lit`CannotSpecifyMultiplePrefixRules`, 'Cannot specify more than one prefix rule in a filter.', scope);
       }
       renderedRules.push({ Name: 'prefix', Value: rule.prefix });
       hasPrefix = true;

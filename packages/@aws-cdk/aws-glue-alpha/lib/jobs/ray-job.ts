@@ -1,10 +1,13 @@
 import { CfnJob } from 'aws-cdk-lib/aws-glue';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import { Job, JobProps } from './job';
-import { Construct } from 'constructs';
-import { JobType, GlueVersion, WorkerType, Runtime } from '../constants';
+import type * as iam from 'aws-cdk-lib/aws-iam';
+import { ValidationError } from 'aws-cdk-lib/core';
+import { memoizedGetter, lit } from 'aws-cdk-lib/core/lib/helpers-internal';
 import { addConstructMetadata } from 'aws-cdk-lib/core/lib/metadata-resource';
 import { propertyInjectable } from 'aws-cdk-lib/core/lib/prop-injectable';
+import type { Construct } from 'constructs';
+import type { JobProps } from './job';
+import { Job } from './job';
+import { JobType, GlueVersion, WorkerType, Runtime } from '../constants';
 
 /**
  * Properties for creating a Ray Glue job
@@ -28,6 +31,24 @@ export interface RayJobProps extends JobProps {
    * @default - no job run queuing
    */
   readonly jobRunQueuingEnabled?: boolean;
+
+  /**
+   * Enable profiling metrics for the Glue job.
+   *
+   * When enabled, adds '--enable-metrics' to job arguments.
+   *
+   * @default true
+   */
+  readonly enableMetrics?: boolean;
+
+  /**
+   * Enable observability metrics for the Glue job.
+   *
+   * When enabled, adds '--enable-observability-metrics': 'true' to job arguments.
+   *
+   * @default true
+   */
+  readonly enableObservabilityMetrics?: boolean;
 }
 
 /**
@@ -42,10 +63,9 @@ export interface RayJobProps extends JobProps {
 export class RayJob extends Job {
   /** Uniquely identifies this class. */
   public static readonly PROPERTY_INJECTION_ID: string = '@aws-cdk.aws-glue-alpha.RayJob';
-  public readonly jobArn: string;
-  public readonly jobName: string;
   public readonly role: iam.IRole;
   public readonly grantPrincipal: iam.IPrincipal;
+  private resource: CfnJob;
 
   /**
    * RayJob constructor
@@ -57,16 +77,16 @@ export class RayJob extends Job {
     // Enhanced CDK Analytics Telemetry
     addConstructMetadata(this, props);
 
-    this.jobName = props.jobName ?? '';
-
     // Set up role and permissions for principal
     this.role = props.role;
     this.grantPrincipal = this.role;
 
     // Enable CloudWatch metrics and continuous logging by default as a best practice
     const continuousLoggingArgs = this.setupContinuousLogging(this.role, props.continuousLogging);
-    const profilingMetricsArgs = { '--enable-metrics': '' };
-    const observabilityMetricsArgs = { '--enable-observability-metrics': 'true' };
+
+    // Conditionally include metrics arguments (default to enabled for backward compatibility)
+    const profilingMetricsArgs = (props.enableMetrics ?? true) ? { '--enable-metrics': '' } : {};
+    const observabilityMetricsArgs = (props.enableObservabilityMetrics ?? true) ? { '--enable-observability-metrics': 'true' } : {};
 
     // Combine command line arguments into a single line item
     const defaultArguments = {
@@ -77,10 +97,10 @@ export class RayJob extends Job {
     };
 
     if (props.workerType && props.workerType !== WorkerType.Z_2X) {
-      throw new Error('Ray jobs only support Z.2X worker type');
+      throw new ValidationError(lit`RayJobsOnlySupportZ2XWorkerType`, 'Ray jobs only support Z.2X worker type', this);
     }
 
-    const jobResource = new CfnJob(this, 'Resource', {
+    this.resource = new CfnJob(this, 'Resource', {
       name: props.jobName,
       description: props.description,
       role: this.role.roleArn,
@@ -101,9 +121,15 @@ export class RayJob extends Job {
       tags: props.tags,
       defaultArguments,
     });
+  }
 
-    const resourceName = this.getResourceNameAttribute(jobResource.ref);
-    this.jobArn = this.buildJobArn(this, resourceName);
-    this.jobName = resourceName;
+  @memoizedGetter
+  public get jobArn(): string {
+    return this.buildJobArn(this, this.jobName);
+  }
+
+  @memoizedGetter
+  public get jobName(): string {
+    return this.getResourceNameAttribute(this.resource.ref);
   }
 }

@@ -78,13 +78,17 @@ export abstract class CfnElement extends Construct {
     }
   }
 
+  public with(...mixins: IMixin[]): IConstruct {
+    return withMixins(this, ...mixins);
+  }
+
   /**
    * Overrides the auto-generated logical ID with a specific ID.
    * @param newLogicalId The new logical ID to use for this stack element.
    */
   public overrideLogicalId(newLogicalId: string) {
     if (this._logicalIdLocked) {
-      throw new ValidationError(`The logicalId for resource at path ${Node.of(this).path} has been locked and cannot be overridden\n` +
+      throw new ValidationError(lit`LogicalIdLocked`, `The logicalId for resource at path ${Node.of(this).path} has been locked and cannot be overridden\n` +
         'Make sure you are calling "overrideLogicalId" before Stack.exportValue', this);
     } else {
       this._logicalIdOverride = newLogicalId;
@@ -177,14 +181,14 @@ export abstract class CfnElement extends Construct {
 }
 
 /**
- * Base class for referencable CloudFormation constructs which are not Resources
+ * Base class for referenceable CloudFormation constructs which are not Resources
  *
  * These constructs are things like Conditions and Parameters, can be
  * referenced by taking the `.ref` attribute.
  *
  * Resource constructs do not inherit from CfnRefElement because they have their
  * own, more specific types returned from the .ref attribute. Also, some
- * resources aren't referencable at all (such as BucketPolicies or GatewayAttachments).
+ * resources aren't referenceable at all (such as BucketPolicies or GatewayAttachments).
  */
 export abstract class CfnRefElement extends CfnElement {
   /**
@@ -207,4 +211,7 @@ function notTooLong(x: string) {
 import { CfnReference } from './private/cfn-reference';
 import { Stack } from './stack';
 import { Token } from './token';import { ValidationError } from './errors';
+import type { IConstruct, IMixin } from 'constructs';
+import { withMixins } from './mixins/private/mixin-metadata';
+import { lit } from './private/literal-string';
 

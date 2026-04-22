@@ -782,6 +782,40 @@ describe('instance', () => {
     });
   });
 
+  test('can use metricReadIOPS', () => {
+    // WHEN
+    const instance = new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.MYSQL,
+      vpc,
+    });
+
+    // THEN
+    expect(stack.resolve(instance.metricReadIOPS())).toEqual({
+      dimensions: { DBInstanceIdentifier: { Ref: 'InstanceC1063A87' } },
+      namespace: 'AWS/RDS',
+      metricName: 'ReadIOPS',
+      period: cdk.Duration.minutes(5),
+      statistic: 'Average',
+    });
+  });
+
+  test('can use metricWriteIOPS', () => {
+    // WHEN
+    const instance = new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.MYSQL,
+      vpc,
+    });
+
+    // THEN
+    expect(stack.resolve(instance.metricWriteIOPS())).toEqual({
+      dimensions: { DBInstanceIdentifier: { Ref: 'InstanceC1063A87' } },
+      namespace: 'AWS/RDS',
+      metricName: 'WriteIOPS',
+      period: cdk.Duration.minutes(5),
+      statistic: 'Average',
+    });
+  });
+
   test('can resolve endpoint port and socket address', () => {
     // WHEN
     const instance = new rds.DatabaseInstance(stack, 'Instance', {
@@ -1404,7 +1438,6 @@ describe('instance', () => {
   });
 
   test('createGrant - creates IAM policy for instance replica when the USE_CORRECT_VALUE_FOR_INSTANCE_RESOURCE_ID_PROPERTY feature flag is enabled', () => {
-    const cloudwatchTraceLog = 'trace';
     const app = new cdk.App({ context: { [cxapi.USE_CORRECT_VALUE_FOR_INSTANCE_RESOURCE_ID_PROPERTY]: true } });
     stack = new cdk.Stack(app);
     vpc = new ec2.Vpc( stack, 'VPC' );
@@ -1467,7 +1500,6 @@ describe('instance', () => {
   });
 
   test('createGrant - creates IAM policy for instance replica when the USE_CORRECT_VALUE_FOR_INSTANCE_RESOURCE_ID_PROPERTY feature flag is disabled by default', () => {
-    const cloudwatchTraceLog = 'trace';
     const app = new cdk.App();
     stack = new cdk.Stack(app);
     vpc = new ec2.Vpc( stack, 'VPC' );
@@ -1491,7 +1523,6 @@ describe('instance', () => {
     replicaInstance.grantConnect(role, 'my-user');
 
     // THEN
-    app.synth();
     Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: {
         Statement: [{
@@ -1714,6 +1745,19 @@ describe('instance', () => {
 
       Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
         PerformanceInsightsRetentionPeriod: rds.PerformanceInsightRetention[performanceInsightRetentionKey],
+      });
+    });
+
+    test('explicitly disabling performance insights is respected', () => {
+      new rds.DatabaseInstanceFromSnapshot(stack, 'Instance', {
+        engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_0_19 }),
+        vpc,
+        snapshotIdentifier: 'my-snapshot',
+        enablePerformanceInsights: false,
+      });
+
+      Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+        EnablePerformanceInsights: false,
       });
     });
 
@@ -2254,6 +2298,198 @@ describe('instance', () => {
       storageThroughput: 2500,
     })).toThrow(/maximum ratio of storage throughput to IOPS is 0.25/);
   });
+
+  test.each([
+    rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT,
+    rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+  ])('DatabaseInstance can specify engine lifecycle support %s', (engineLifecycleSupport) => {
+    // WHEN
+    new rds.DatabaseInstance(stack, 'Database', {
+      engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_4_5 }),
+      vpc,
+      engineLifecycleSupport,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      EngineLifecycleSupport: engineLifecycleSupport,
+    });
+  });
+
+  test.each([
+    rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT,
+    rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+  ])('DatabaseInstanceFromSnapshot can specify engine lifecycle support %s', (engineLifecycleSupport) => {
+    // WHEN
+    new rds.DatabaseInstanceFromSnapshot(stack, 'Database', {
+      snapshotIdentifier: 'my-snapshot',
+      engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_4_5 }),
+      vpc,
+      engineLifecycleSupport,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      EngineLifecycleSupport: engineLifecycleSupport,
+    });
+  });
+
+  test.each([
+    rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT,
+    rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+  ])('DatabaseInstanceReadReplica can specify engine lifecycle support %s', (engineLifecycleSupport) => {
+    // GIVEN
+    const sourceInstance = new rds.DatabaseInstance(stack, 'Database', {
+      engine: rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_4_5 }),
+      vpc,
+    });
+
+    // WHEN
+    new rds.DatabaseInstanceReadReplica(stack, 'ReadReplica', {
+      sourceDatabaseInstance: sourceInstance,
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE2, ec2.InstanceSize.LARGE),
+      vpc,
+      engineLifecycleSupport,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      SourceDBInstanceIdentifier: {
+        'Fn::Join': ['', [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':rds:',
+          { Ref: 'AWS::Region' },
+          ':',
+          { Ref: 'AWS::AccountId' },
+          ':db:',
+          { Ref: 'DatabaseB269D8BB' },
+        ]],
+      },
+      EngineLifecycleSupport: engineLifecycleSupport,
+    });
+  });
+
+  test.each([
+    rds.DatabaseInstanceEngine.oracleEe({ version: rds.OracleEngineVersion.VER_19 }),
+    rds.DatabaseInstanceEngine.mariaDb({ version: rds.MariaDbEngineVersion.VER_10_6 }),
+    rds.DatabaseInstanceEngine.sqlServerEe({ version: rds.SqlServerEngineVersion.VER_16_00_4185_3_V1 }),
+  ])('DatabaseInstance cannot specify engine lifecycle support for engine %s', (engine) => {
+    expect(() => new rds.DatabaseInstance(stack, 'Database', {
+      engine,
+      vpc,
+      engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+    })).toThrow(/'engineLifecycleSupport' can only be specified for RDS for MySQL and RDS for PostgreSQL/);
+  });
+
+  test.each([
+    rds.DatabaseInstanceEngine.oracleEe({ version: rds.OracleEngineVersion.VER_19 }),
+    rds.DatabaseInstanceEngine.mariaDb({ version: rds.MariaDbEngineVersion.VER_10_6 }),
+    rds.DatabaseInstanceEngine.sqlServerEe({ version: rds.SqlServerEngineVersion.VER_16_00_4185_3_V1 }),
+  ])('DatabaseInstanceFromSnapshot cannot specify engine lifecycle support for engine %s', (engine) => {
+    expect(() => new rds.DatabaseInstanceFromSnapshot(stack, 'Database', {
+      snapshotIdentifier: 'my-snapshot',
+      engine,
+      vpc,
+      engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+    })).toThrow(/'engineLifecycleSupport' can only be specified for RDS for MySQL and RDS for PostgreSQL/);
+  });
+
+  test.each([
+    rds.DatabaseInstanceEngine.oracleEe({ version: rds.OracleEngineVersion.VER_19 }),
+    rds.DatabaseInstanceEngine.mariaDb({ version: rds.MariaDbEngineVersion.VER_10_6 }),
+    rds.DatabaseInstanceEngine.sqlServerEe({ version: rds.SqlServerEngineVersion.VER_16_00_4185_3_V1 }),
+  ])('DatabaseInstanceReadReplica cannot specify engine lifecycle support for engine %s', (engine) => {
+    // GIVEN
+    const sourceInstance = new rds.DatabaseInstance(stack, 'Database', {
+      engine,
+      vpc,
+    });
+
+    expect(() => new rds.DatabaseInstanceReadReplica(stack, 'ReadReplica', {
+      sourceDatabaseInstance: sourceInstance,
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE2, ec2.InstanceSize.LARGE),
+      vpc,
+      engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+    })).toThrow(/'engineLifecycleSupport' can only be specified for RDS for MySQL and RDS for PostgreSQL/);
+  });
+
+  test.each([
+    rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_4_5 }),
+    rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_5_7 }),
+    rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+    rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_15 }),
+  ])('DatabaseInstance can specify engine lifecycle support for engine %s', (engine) => {
+    // WHEN
+    new rds.DatabaseInstance(stack, 'Database', {
+      engine,
+      vpc,
+      engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      EngineLifecycleSupport: 'open-source-rds-extended-support-disabled',
+    });
+  });
+
+  test.each([
+    rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_4_5 }),
+    rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_5_7 }),
+    rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+    rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_15 }),
+  ])('DatabaseInstanceFromSnapshot can specify engine lifecycle support for engine %s', (engine) => {
+    // WHEN
+    new rds.DatabaseInstanceFromSnapshot(stack, 'Database', {
+      snapshotIdentifier: 'my-snapshot',
+      engine,
+      vpc,
+      engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      EngineLifecycleSupport: 'open-source-rds-extended-support-disabled',
+    });
+  });
+
+  test.each([
+    rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_8_4_5 }),
+    rds.DatabaseInstanceEngine.mysql({ version: rds.MysqlEngineVersion.VER_5_7 }),
+    rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+    rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_15 }),
+  ])('DatabaseInstanceReadReplica can specify engine lifecycle support for engine %s', (engine) => {
+    // GIVEN
+    const sourceInstance = new rds.DatabaseInstance(stack, 'Database', {
+      engine,
+      vpc,
+    });
+
+    // WHEN
+    new rds.DatabaseInstanceReadReplica(stack, 'ReadReplica', {
+      sourceDatabaseInstance: sourceInstance,
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE2, ec2.InstanceSize.LARGE),
+      vpc,
+      engineLifecycleSupport: rds.EngineLifecycleSupport.OPEN_SOURCE_RDS_EXTENDED_SUPPORT_DISABLED,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      SourceDBInstanceIdentifier: {
+        'Fn::Join': ['', [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':rds:',
+          { Ref: 'AWS::Region' },
+          ':',
+          { Ref: 'AWS::AccountId' },
+          ':db:',
+          { Ref: 'DatabaseB269D8BB' },
+        ]],
+      },
+      EngineLifecycleSupport: 'open-source-rds-extended-support-disabled',
+    });
+  });
 });
 
 test.each([
@@ -2329,5 +2565,85 @@ describe('cross-account instance', () => {
         },
       },
     });
+  });
+});
+
+describe('database insights for instance', () => {
+  test('instance with the advanced mode of database insights', () => {
+    // GIVEN
+    stack = new cdk.Stack();
+    vpc = new ec2.Vpc(stack, 'VPC');
+
+    // WHEN
+    new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_13_7 }),
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MEDIUM),
+      vpc,
+      databaseInsightsMode: rds.DatabaseInsightsMode.ADVANCED,
+      performanceInsightRetention: rds.PerformanceInsightRetention.MONTHS_15,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      EnablePerformanceInsights: true,
+      PerformanceInsightsRetentionPeriod: 465,
+      DatabaseInsightsMode: 'advanced',
+    });
+  });
+
+  test.each([true, false])('instance with the standard mode of database insights when enablePerformanceInsights is %s', (enablePerformanceInsights) => {
+    // GIVEN
+    stack = new cdk.Stack();
+    vpc = new ec2.Vpc(stack, 'VPC');
+
+    // WHEN
+    new rds.DatabaseInstance(stack, 'Instance', {
+      engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_17_5 }),
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MEDIUM),
+      vpc,
+      enablePerformanceInsights,
+      databaseInsightsMode: rds.DatabaseInsightsMode.STANDARD,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::RDS::DBInstance', {
+      EnablePerformanceInsights: enablePerformanceInsights,
+      DatabaseInsightsMode: 'standard',
+    });
+  });
+
+  test('throw if performance insights is disabled and the advanced mode of database insights is set', () => {
+    // GIVEN
+    stack = new cdk.Stack();
+    vpc = new ec2.Vpc(stack, 'VPC');
+
+    // THEN
+    expect(() => {
+      new rds.DatabaseInstance(stack, 'Instance', {
+        engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_17_5 }),
+        instanceType: ec2.InstanceType.of(ec2.InstanceClass.R5, ec2.InstanceSize.LARGE),
+        vpc,
+        enablePerformanceInsights: false,
+        databaseInsightsMode: rds.DatabaseInsightsMode.ADVANCED,
+        performanceInsightRetention: rds.PerformanceInsightRetention.MONTHS_15,
+      });
+    }).toThrow(/`enablePerformanceInsights` disabled, but `performanceInsightRetention` or `performanceInsightEncryptionKey` was set, or `databaseInsightsMode` was set to '\${DatabaseInsightsMode.ADVANCED}'/);
+  });
+
+  test('throw if the advanced mode of database insights is set and any retention other than MONTHS_15 is set for performanceInsightRetention', () => {
+    // GIVEN
+    stack = new cdk.Stack();
+    vpc = new ec2.Vpc(stack, 'VPC');
+
+    // THEN
+    expect(() => {
+      new rds.DatabaseInstance(stack, 'Instance', {
+        engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_17_5 }),
+        instanceType: ec2.InstanceType.of(ec2.InstanceClass.R5, ec2.InstanceSize.LARGE),
+        vpc,
+        performanceInsightRetention: rds.PerformanceInsightRetention.LONG_TERM,
+        databaseInsightsMode: rds.DatabaseInsightsMode.ADVANCED,
+      });
+    }).toThrow(/`performanceInsightRetention` must be set to '\${PerformanceInsightRetention.MONTHS_15}' when `databaseInsightsMode` is set to '\${DatabaseInsightsMode.ADVANCED}'/);
   });
 });

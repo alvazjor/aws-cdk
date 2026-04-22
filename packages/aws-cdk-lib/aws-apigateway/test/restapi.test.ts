@@ -1,12 +1,13 @@
 import { testDeprecated } from '@aws-cdk/cdk-build-tools';
-import { cx_api } from '../..';
 import { Template, Match } from '../../assertions';
 import { UserPool } from '../../aws-cognito';
 import { GatewayVpcEndpoint } from '../../aws-ec2';
 import * as ec2 from '../../aws-ec2';
 import * as iam from '../../aws-iam';
-import { App, CfnElement, CfnResource, Lazy, RemovalPolicy, Size, Stack } from '../../core';
+import type { CfnElement } from '../../core';
+import { App, CfnResource, Lazy, RemovalPolicy, Size, Stack } from '../../core';
 import { JSII_RUNTIME_SYMBOL } from '../../core/lib/constants';
+import * as cx_api from '../../cx-api';
 import * as apigw from '../lib';
 
 let stack: Stack;
@@ -737,6 +738,55 @@ describe('restapi', () => {
     });
   });
 
+  test('addModel supports additionalItems as boolean and object', () => {
+    const api = new apigw.RestApi(stack, 'myapi-additionalitems');
+    api.root.addMethod('OPTIONS');
+
+    // WHEN: additionalItems as boolean
+    api.addModel('modelWithAdditionalItemsTrue', {
+      schema: {
+        schema: apigw.JsonSchemaVersion.DRAFT4,
+        title: 'test-true',
+        type: apigw.JsonSchemaType.ARRAY,
+        items: { type: apigw.JsonSchemaType.STRING },
+        additionalItems: true,
+      },
+    });
+
+    // WHEN: additionalItems as object
+    api.addModel('modelWithAdditionalItemsObject', {
+      schema: {
+        schema: apigw.JsonSchemaVersion.DRAFT4,
+        title: 'test-object',
+        type: apigw.JsonSchemaType.ARRAY,
+        items: { type: apigw.JsonSchemaType.STRING },
+        additionalItems: { type: apigw.JsonSchemaType.NUMBER },
+      },
+    });
+
+    // THEN: boolean case
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Model', {
+      Schema: {
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        title: 'test-true',
+        type: 'array',
+        items: { type: 'string' },
+        additionalItems: true,
+      },
+    });
+
+    // THEN: object case
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Model', {
+      Schema: {
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        title: 'test-object',
+        type: 'array',
+        items: { type: 'string' },
+        additionalItems: { type: 'number' },
+      },
+    });
+  });
+
   test('addRequestValidator is supported', () => {
     const api = new apigw.RestApi(stack, 'myapi');
     api.root.addMethod('OPTIONS');
@@ -1116,6 +1166,30 @@ describe('SpecRestApi', () => {
     Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
       Name: 'SpecRestApi',
       MinimumCompressionSize: 1024,
+    });
+  });
+
+  test('SpecRestApi binaryMediaTypes', () => {
+    // GIVEN
+    const app = new App({
+      context: {
+        '@aws-cdk/aws-apigateway:disableCloudWatchRole': true,
+      },
+    });
+
+    stack = new Stack(app);
+    const api = new apigw.SpecRestApi(stack, 'SpecRestApi', {
+      apiDefinition: apigw.ApiDefinition.fromInline({ foo: 'bar' }),
+      binaryMediaTypes: ['image/png', 'application/octet-stream'],
+    });
+
+    // WHEN
+    api.root.addMethod('GET');
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::RestApi', {
+      Name: 'SpecRestApi',
+      BinaryMediaTypes: ['image/png', 'application/octet-stream'],
     });
   });
 
@@ -1738,7 +1812,7 @@ describe('SpecRestApi', () => {
       const api = apigw.RestApi.fromRestApiId(stack, 'Api', 'api-id');
 
       // THEN
-      const result = api.addToResourcePolicy(new iam.PolicyStatement({
+      const result = (api as any).addToResourcePolicy(new iam.PolicyStatement({
         actions: ['execute-api:Invoke'],
         resources: [Stack.of(stack).formatArn({
           service: 'execute-api',
@@ -1758,7 +1832,7 @@ describe('SpecRestApi', () => {
       });
 
       // THEN
-      const result = api.addToResourcePolicy(new iam.PolicyStatement({
+      const result = (api as any).addToResourcePolicy(new iam.PolicyStatement({
         actions: ['execute-api:Invoke'],
         resources: [Stack.of(stack).formatArn({
           service: 'execute-api',

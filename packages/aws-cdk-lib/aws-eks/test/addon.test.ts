@@ -1,6 +1,6 @@
 import { KubectlV31Layer } from '@aws-cdk/lambda-layer-kubectl-v31';
 import { Template } from '../../assertions';
-import { App, Stack } from '../../core';
+import { App, RemovalPolicy, Stack } from '../../core';
 import { Addon, KubernetesVersion, Cluster } from '../lib';
 
 describe('Addon', () => {
@@ -13,7 +13,7 @@ describe('Addon', () => {
     stack = new Stack(app, 'Stack');
     cluster = new Cluster(stack, 'Cluster', {
       kubectlLayer: new KubectlV31Layer(stack, 'KubectlLayer'),
-      version: KubernetesVersion.V1_32,
+      version: KubernetesVersion.V1_33,
     });
   });
 
@@ -132,5 +132,19 @@ describe('Addon', () => {
     // THEN
     expect(addon.addonName).toEqual('my-addon');
     expect(addon.addonArn).toEqual(addonArn);
+  });
+
+  test('supports custom removal policy', () => {
+    // WHEN
+    new Addon(stack, 'TestAddon', {
+      addonName: 'test-addon',
+      cluster,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResource('AWS::EKS::Addon', {
+      DeletionPolicy: 'Retain',
+    });
   });
 });

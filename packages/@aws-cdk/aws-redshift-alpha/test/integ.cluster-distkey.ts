@@ -1,8 +1,8 @@
+import * as integ from '@aws-cdk/integ-tests-alpha';
+import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as kms from 'aws-cdk-lib/aws-kms';
-import * as cdk from 'aws-cdk-lib';
-import * as integ from '@aws-cdk/integ-tests-alpha';
-import * as constructs from 'constructs';
+import type * as constructs from 'constructs';
 import * as redshift from '../lib';
 
 /**
@@ -18,6 +18,8 @@ const app = new cdk.App({
     '@aws-cdk/aws-lambda:useCdkManagedLogGroup': false,
   },
 });
+
+const stack = new cdk.Stack(app, 'aws-cdk-redshift-cluster-database');
 
 interface RedshiftDistKeyStackProps extends cdk.StackProps {
   hasDistKey: boolean;
@@ -66,11 +68,11 @@ class RedshiftDistKeyStack extends cdk.Stack {
   }
 }
 
-const createStack = new RedshiftDistKeyStack(app, 'aws-cdk-redshift-distkey-create', {
+const createStack = new RedshiftDistKeyStack(stack, 'aws-cdk-redshift-distkey-create', {
   hasDistKey: false,
 });
 
-const updateStack = new RedshiftDistKeyStack(app, 'aws-cdk-redshift-distkey-update', {
+const updateStack = new RedshiftDistKeyStack(stack, 'aws-cdk-redshift-distkey-update', {
   hasDistKey: true,
 });
 
@@ -87,7 +89,5 @@ stacks.forEach(s => {
 });
 
 new integ.IntegTest(app, 'aws-cdk-redshift-distkey-test', {
-  testCases: stacks,
+  testCases: [stack],
 });
-
-app.synth();

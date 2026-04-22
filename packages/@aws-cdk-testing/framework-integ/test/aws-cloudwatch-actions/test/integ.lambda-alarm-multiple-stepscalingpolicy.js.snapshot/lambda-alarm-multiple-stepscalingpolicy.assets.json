@@ -1,16 +1,16 @@
 {
-  "version": "41.0.0",
+  "version": "50.0.0",
   "files": {
-    "35a7a60080f6b049183fb91eb6885b7c36daec82adbe16993fe0b53cd1dbf531": {
+    "bc3292ad55bf7890ad27e7c28d9653569afc8ee01cd6ea921b94094465b42db7": {
       "displayName": "lambda-alarm-multiple-stepscalingpolicy Template",
       "source": {
         "path": "lambda-alarm-multiple-stepscalingpolicy.template.json",
         "packaging": "file"
       },
       "destinations": {
-        "current_account-current_region": {
+        "current_account-current_region-d2b0f35c": {
           "bucketName": "cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}",
-          "objectKey": "35a7a60080f6b049183fb91eb6885b7c36daec82adbe16993fe0b53cd1dbf531.json",
+          "objectKey": "bc3292ad55bf7890ad27e7c28d9653569afc8ee01cd6ea921b94094465b42db7.json",
           "assumeRoleArn": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-hnb659fds-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
         }
       }

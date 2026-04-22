@@ -1,8 +1,9 @@
 import * as os from 'os';
 import * as path from 'path';
-import { Architecture, AssetCode, Code, Runtime } from 'aws-cdk-lib/aws-lambda';
+import type { Architecture, AssetCode } from 'aws-cdk-lib/aws-lambda';
+import { Code, Runtime } from 'aws-cdk-lib/aws-lambda';
 import * as cdk from 'aws-cdk-lib/core';
-import { BundlingOptions } from './types';
+import type { BundlingOptions } from './types';
 import { exec, findUp, getGoBuildVersion } from './util';
 
 /**
@@ -148,6 +149,7 @@ export class Bundling implements cdk.BundlingOptions {
           IMAGE: Runtime.GO_1_X.bundlingImage.image, // always use the GO_1_X build image
         },
         platform: props.architecture.dockerPlatform,
+        network: props.network,
       })
       : cdk.DockerImage.fromRegistry('dummy'); // Do not build if we don't need to
 

@@ -68,7 +68,7 @@ for more granular details.
 
 ### Spark Jobs
 
-1. **ETL Jobs**
+#### ETL Jobs
 
 ETL jobs support pySpark and Scala languages, for which there are separate but
 similar constructors. ETL jobs default to the G2 worker type, but you can
@@ -113,7 +113,7 @@ new glue.PySparkEtlJob(stack, 'PySparkETLJob', {
   description: 'This is a description',
   role,
   script,
-  glueVersion: glue.GlueVersion.V3_0,
+  glueVersion: glue.GlueVersion.V5_1,
   continuousLogging: { enabled: false },
   workerType: glue.WorkerType.G_2X,
   maxConcurrentRuns: 100,
@@ -130,7 +130,7 @@ new glue.PySparkEtlJob(stack, 'PySparkETLJob', {
 });
 ```
 
-**Streaming Jobs**
+#### Streaming Jobs
 
 Streaming jobs are similar to ETL jobs, except that they perform ETL on data
 streams using the Apache Spark Structured Streaming framework. Some Spark
@@ -169,7 +169,7 @@ new glue.PySparkStreamingJob(stack, 'PySparkStreamingJob', {
   description: 'This is a description',
   role,
   script,
-  glueVersion: glue.GlueVersion.V3_0,
+  glueVersion: glue.GlueVersion.V5_1,
   continuousLogging: { enabled: false },
   workerType: glue.WorkerType.G_2X,
   maxConcurrentRuns: 100,
@@ -186,7 +186,7 @@ new glue.PySparkStreamingJob(stack, 'PySparkStreamingJob', {
 });
 ```
 
-**Flex Jobs**
+#### Flex Jobs
 
 The flexible execution class is appropriate for non-urgent jobs such as
 pre-production jobs, testing, and one-time data loads. Flexible jobs default
@@ -222,7 +222,7 @@ new glue.PySparkEtlJob(stack, 'pySparkEtlJob', {
   description: 'This is a description',
   role,
   script,
-  glueVersion: glue.GlueVersion.V3_0,
+  glueVersion: glue.GlueVersion.V5_1,
   continuousLogging: { enabled: false },
   workerType: glue.WorkerType.G_2X,
   maxConcurrentRuns: 100,
@@ -343,6 +343,36 @@ new glue.RayJob(stack, 'ImportedJob', {
 });
 ```
 
+### Metrics Control
+
+By default, Glue jobs enable CloudWatch metrics (`--enable-metrics`) and observability metrics (`--enable-observability-metrics`) for monitoring and debugging. You can disable these metrics to reduce CloudWatch costs:
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+import * as iam from 'aws-cdk-lib/aws-iam';
+declare const stack: cdk.Stack;
+declare const role: iam.IRole;
+declare const script: glue.Code;
+
+// Disable both metrics for cost optimization
+new glue.PySparkEtlJob(stack, 'CostOptimizedJob', {
+  role,
+  script,
+  enableMetrics: false,
+  enableObservabilityMetrics: false,
+});
+
+// Selective control - keep observability, disable profiling
+new glue.PySparkEtlJob(stack, 'SelectiveJob', {
+  role,
+  script,
+  enableMetrics: false,
+  // enableObservabilityMetrics defaults to true
+});
+```
+
+This feature is available for all Spark job types (ETL, Streaming, Flex) and Ray jobs.
+
 ### Enable Job Run Queuing
 
 AWS Glue job queuing monitors your account level quotas and limits. If quotas or limits are insufficient to start a Glue job run, AWS Glue will automatically queue the job and wait for limits to free up. Once limits become available, AWS Glue will retry the job run. Glue jobs will queue for limits like max concurrent job runs per account, max concurrent Data Processing Units (DPU), and resource unavailable due to IP address exhaustion in Amazon Virtual Private Cloud (Amazon VPC).
@@ -389,14 +419,14 @@ override it if you prefer for your trigger not to start on creation.
 Reference the workflow-triggers.test.ts unit tests for examples of creating
 workflows and triggers.
 
-1. **On-Demand Triggers**
+#### **1. On-Demand Triggers**
 
 On-demand triggers can start glue jobs or crawlers. This construct provides
 convenience functions to create on-demand crawler or job triggers. The constructor
 takes an optional description parameter, but abstracts the requirement of an
 actions list using the job or crawler objects using conditional types.
 
-1. **Scheduled Triggers**
+#### **2. Scheduled Triggers**
 
 You can create scheduled triggers using cron expressions. This construct
 provides daily, weekly, and monthly convenience functions,
@@ -424,13 +454,13 @@ The trigger actions are executed when the predicateCondition is true.
 A `Connection` allows Glue jobs, crawlers and development endpoints to access
 certain types of data stores.
 
-***Secrets Management
-    **You must specify JDBC connection credentials in Secrets Manager and
+* **Secrets Management**
+    You must specify JDBC connection credentials in Secrets Manager and
     provide the Secrets Manager Key name as a property to the job connection.
 
 * **Networking - the CDK determines the best fit subnet for Glue connection
-configuration
-    **The prior version of the glue-alpha-module requires the developer to
+configuration**
+    The prior version of the glue-alpha-module requires the developer to
     specify the subnet of the Connection when it’s defined. Now, you can still
     specify the specific subnet you want to use, but are no longer required
     to. You are only required to provide a VPC and either a public or private
@@ -680,6 +710,186 @@ new glue.S3Table(this, 'MyTable', {
   }],
   dataFormat: glue.DataFormat.JSON,
   enablePartitionFiltering: true,
+});
+```
+
+### Partition Projection
+
+Partition projection allows Athena to automatically add new partitions as new data arrives, without requiring `ALTER TABLE ADD PARTITION` statements. This improves query performance and reduces management overhead by eliminating the need to manually manage partition metadata.
+
+For more information, see the [AWS documentation on partition projection](https://docs.aws.amazon.com/athena/latest/ug/partition-projection.html).
+
+#### INTEGER Projection
+
+For partition keys with sequential numeric values:
+
+```ts
+declare const myDatabase: glue.Database;
+new glue.S3Table(this, 'MyTable', {
+  database: myDatabase,
+  columns: [{
+    name: 'data',
+    type: glue.Schema.STRING,
+  }],
+  partitionKeys: [{
+    name: 'year',
+    type: glue.Schema.INTEGER,
+  }],
+  dataFormat: glue.DataFormat.JSON,
+  partitionProjection: {
+    year: glue.PartitionProjectionConfiguration.integer({
+      min: 2020,
+      max: 2023,
+      interval: 1,  // optional, defaults to 1
+      digits: 4,    // optional, pads with leading zeros
+    }),
+  },
+});
+```
+
+#### DATE Projection
+
+For partition keys with date or timestamp values. Supports both fixed dates and relative dates using `NOW`:
+
+```ts
+declare const myDatabase: glue.Database;
+new glue.S3Table(this, 'MyTable', {
+  database: myDatabase,
+  columns: [{
+    name: 'data',
+    type: glue.Schema.STRING,
+  }],
+  partitionKeys: [{
+    name: 'date',
+    type: glue.Schema.STRING,
+  }],
+  dataFormat: glue.DataFormat.JSON,
+  partitionProjection: {
+    date: glue.PartitionProjectionConfiguration.date({
+      min: '2020-01-01',
+      max: '2023-12-31',
+      format: 'yyyy-MM-dd',
+      interval: 1,  // optional, defaults to 1
+      intervalUnit: glue.DateIntervalUnit.DAYS,  // optional: YEARS, MONTHS, WEEKS, DAYS, HOURS, MINUTES, SECONDS
+    }),
+  },
+});
+```
+
+You can also use relative dates with `NOW`:
+
+```ts
+declare const myDatabase: glue.Database;
+new glue.S3Table(this, 'MyTable', {
+  database: myDatabase,
+  columns: [{
+    name: 'data',
+    type: glue.Schema.STRING,
+  }],
+  partitionKeys: [{
+    name: 'date',
+    type: glue.Schema.STRING,
+  }],
+  dataFormat: glue.DataFormat.JSON,
+  partitionProjection: {
+    date: glue.PartitionProjectionConfiguration.date({
+      min: 'NOW-3YEARS',
+      max: 'NOW',
+      format: 'yyyy-MM-dd',
+    }),
+  },
+});
+```
+
+#### ENUM Projection
+
+For partition keys with a known set of values:
+
+```ts
+declare const myDatabase: glue.Database;
+new glue.S3Table(this, 'MyTable', {
+  database: myDatabase,
+  columns: [{
+    name: 'data',
+    type: glue.Schema.STRING,
+  }],
+  partitionKeys: [{
+    name: 'region',
+    type: glue.Schema.STRING,
+  }],
+  dataFormat: glue.DataFormat.JSON,
+  partitionProjection: {
+    region: glue.PartitionProjectionConfiguration.enum({
+      values: ['us-east-1', 'us-west-2', 'eu-west-1'],
+    }),
+  },
+});
+```
+
+#### INJECTED Projection
+
+For custom partition values injected at query time:
+
+```ts
+declare const myDatabase: glue.Database;
+new glue.S3Table(this, 'MyTable', {
+  database: myDatabase,
+  columns: [{
+    name: 'data',
+    type: glue.Schema.STRING,
+  }],
+  partitionKeys: [{
+    name: 'custom',
+    type: glue.Schema.STRING,
+  }],
+  dataFormat: glue.DataFormat.JSON,
+  partitionProjection: {
+    custom: glue.PartitionProjectionConfiguration.injected(),
+  },
+});
+```
+
+#### Multiple Partition Projections
+
+You can configure partition projection for multiple partition keys:
+
+```ts
+declare const myDatabase: glue.Database;
+new glue.S3Table(this, 'MyTable', {
+  database: myDatabase,
+  columns: [{
+    name: 'data',
+    type: glue.Schema.STRING,
+  }],
+  partitionKeys: [
+    {
+      name: 'year',
+      type: glue.Schema.INTEGER,
+    },
+    {
+      name: 'month',
+      type: glue.Schema.INTEGER,
+    },
+    {
+      name: 'region',
+      type: glue.Schema.STRING,
+    },
+  ],
+  dataFormat: glue.DataFormat.JSON,
+  partitionProjection: {
+    year: glue.PartitionProjectionConfiguration.integer({
+      min: 2020,
+      max: 2023,
+    }),
+    month: glue.PartitionProjectionConfiguration.integer({
+      min: 1,
+      max: 12,
+      digits: 2,
+    }),
+    region: glue.PartitionProjectionConfiguration.enum({
+      values: ['us-east-1', 'us-west-2'],
+    }),
+  },
 });
 ```
 

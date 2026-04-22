@@ -1,5 +1,6 @@
-import { CloudArtifact, CloudAssembly, SynthesisMessageLevel } from '../../cx-api';
-import { Stack } from '../lib';
+import type { CloudAssembly } from '../../cx-api';
+import { CloudArtifact, SynthesisMessageLevel } from '../../cx-api';
+import type { Stack } from '../lib';
 import { CDK_DEBUG } from '../lib/debug';
 import { synthesize } from '../lib/private/synthesis';
 
@@ -38,6 +39,19 @@ export function getWarnings(casm: CloudAssembly) {
     const artifact = CloudArtifact.fromManifest(casm, 'art', stack);
     artifact?.messages.forEach(message => {
       if (message.level === SynthesisMessageLevel.WARNING) {
+        result.push({ path: message.id, message: message.entry.data as string });
+      }
+    });
+  }
+  return result;
+}
+
+export function getInfos(casm: CloudAssembly) {
+  const result = new Array<{ path: string; message: string }>();
+  for (const stack of Object.values(casm.manifest.artifacts ?? {})) {
+    const artifact = CloudArtifact.fromManifest(casm, 'art', stack);
+    artifact?.messages.forEach(message => {
+      if (message.level === SynthesisMessageLevel.INFO) {
         result.push({ path: message.id, message: message.entry.data as string });
       }
     });
