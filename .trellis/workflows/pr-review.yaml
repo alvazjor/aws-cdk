@@ -52,10 +52,10 @@ steps:
       outcome: enum[approve, reject]
       feedback: string
 
+  # Runs after an approve. A reject ends the run at the gate, with the person's feedback.
   - id: would_post
     kind: deterministic
     depends_on: [approve]
-    when: "step.approve.outcome == 'approve'"
     in:
       number: ${workflow.input.subject.number}
       verdict: ${step.review.verdict}
@@ -64,13 +64,3 @@ steps:
       echo "would post: a ${in.verdict} review on pull request #${in.number}:"
       printf '%s\n' "${in.review}"
 
-  - id: rejected
-    kind: deterministic
-    depends_on: [approve]
-    when: "step.approve.outcome == 'reject'"
-    in:
-      number: ${workflow.input.subject.number}
-      feedback: ${step.approve.feedback}
-    run: |
-      echo "rejected at the gate: nothing would be posted on pull request #${in.number}"
-      echo "feedback: ${in.feedback}"
