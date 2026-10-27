@@ -3,6 +3,6 @@ export const INSTANCE_TYPES = {
   inferentia: ['inf1', 'inf2'],
   graviton: ['a1'],
   graviton2: ['c6g', 'm6g', 'r6g', 't4g'],
-  graviton3: ['c7g'],
+  graviton3: ['c7g', 'm7g', 'r7g', 'c8g', 'm8g', 'r8g'],
   trainium: ['trn1', 'trn1n'],
 };
