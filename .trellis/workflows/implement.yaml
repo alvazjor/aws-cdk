@@ -11,7 +11,14 @@ on:
   platform: github
   entity: issue
   action: labeled
-  filter: "workflow.input.data.state == 'open' && 'bug' in workflow.input.data.labels && 'ready-to-implement' in workflow.input.data.labels && workflow.input.raw.label.name in ['bug', 'ready-to-implement'] && workflow.input.actor in ['alvazjor', 'trellis-poc']"  # the second of the two labels was just added, by alvazjor or the triage
+  # Starts when the second of the two labels is added, by alvazjor or by the triage (trellis-poc):
+  # the issue is open, has both labels, the label just added is one of them, and the actor is one of the two.
+  filter: >-
+    workflow.input.data.state == 'open'
+    && 'bug' in workflow.input.data.labels
+    && 'ready-to-implement' in workflow.input.data.labels
+    && workflow.input.raw.label.name in ['bug', 'ready-to-implement']
+    && workflow.input.actor in ['alvazjor', 'trellis-poc']
   self_events: [issue]                 # the triage sets `bug` as trellis-poc, Trellis's own login
   ignore_global_filter: true           # routing.user_filter passes only alvazjor; the filter above also allows trellis-poc
   concurrency:
