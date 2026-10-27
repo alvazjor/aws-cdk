@@ -5,18 +5,10 @@ engine:
   step_timeout_seconds: 1800
 github:
   repository: alvazjor/aws-cdk
-  # The daemon acts as alvazjor (his gh token), so his login is Trellis's own: events he causes are
-  # dropped unless a workflow lists the entity in on.self_events. The demo workflows list theirs, so
-  # his test issues and PRs still start runs.
   self_logins: [alvazjor]
 webhook:
   port: 8782
-routing:
-  # Only events alvazjor causes start runs, whoever else opens something on the fork.
-  user_filter: "workflow.input.actor == 'alvazjor'"
 store:
-  # Outside /workplace/alvazjor: each run's clone and each agent's copy go under this folder, and
-  # an agent started in a folder under the workspace would read the workspace's CLAUDE.md and .claude/.
   path: /tmp/trellis-demo-runs/trellis.db
 sweep:
   interval_seconds: 1800
