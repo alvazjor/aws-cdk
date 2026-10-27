@@ -4,7 +4,7 @@ engine:
   step_timeout_seconds: 1800                             # 30 minutes per step attempt
 github:
   repository: alvazjor/aws-cdk
-  self_logins: [alvazjor]                                # the daemon acts as alvazjor; workflows opt in with self_events
+  self_logins: [trellis-poc]                             # Trellis acts as trellis-poc (secrets/github-bot.token); its own events are dropped
 webhook:
   port: 8782                                             # the GitHub forward delivers here
 routing:

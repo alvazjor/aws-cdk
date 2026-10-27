@@ -8,8 +8,6 @@ description: Review a pull request into main with a Strands agent, hold the revi
 on:
   platform: github
   entity: pull_request
-  # alvazjor is github.self_logins (the daemon acts as him); his own pull requests still start runs.
-  self_events: [pull_request]
   action: [opened, reopened, synchronize, ready_for_review]
   branches: [main]
   filter: "workflow.input.data.state == 'open'"  # not a draft, not closed or merged

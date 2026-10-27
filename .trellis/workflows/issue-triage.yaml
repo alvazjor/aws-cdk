@@ -10,8 +10,6 @@ description: Triage a new issue with the CDK issue triage skill; after approval 
 on:
   platform: github
   entity: issue
-  # alvazjor is github.self_logins (the daemon acts as him); his own issues still start runs.
-  self_events: [issue]
   action: [opened, reopened]
   filter: "workflow.input.data.state == 'open'"
 
