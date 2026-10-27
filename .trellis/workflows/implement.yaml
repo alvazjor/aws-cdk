@@ -1,11 +1,10 @@
 # Demo: implement a triaged bug as a fast follow-up. When an open issue carries both `bug` (the triage
-# sets it) and `ready-to-implement` (alvazjor adds it), a Strands agent makes a small change and opens
-# a DRAFT pull request on the fork. No build, no tests, no gate: the agent
-# writes the branch, the commit and the pull request itself (create_branch, push_files,
-# create_pull_request are its only write tools).
+# sets it) and `ready-to-implement` (alvazjor adds it), a Strands agent makes a small change and
+# PROPOSES the branch, the commit and a draft pull request on the fork. A person approves them at the
+# gate approve_pr (Slack announces the hold); open_pr then performs them. No build, no tests.
 version: 1
 enabled: true
-description: Implement an open issue labeled both bug and ready-to-implement, in either order, open a draft PR on the fork with no build or tests, and hold at review_pr so Slack announces it.
+description: Implement an open issue labeled both bug and ready-to-implement, in either order, and open a draft PR on the fork after approval at a gate. No build, no tests.
 
 on:
   platform: github
@@ -31,7 +30,8 @@ steps:
     agent: strands/implementer
     instruction: |
       Implement the issue in your inputs and open a draft pull request, as your agent instructions
-      describe. Submit pr_url, branch and summary.
+      describe: propose the branch, the commit and the draft pull request, then submit branch, title
+      and summary.
     in:
       owner: alvazjor
       repo: aws-cdk
@@ -40,21 +40,36 @@ steps:
       body: ${workflow.input.raw.issue.body}
       url: ${workflow.input.raw.issue.html_url}
       branch: trellis/implement-issue-${workflow.input.subject.number}
+    allowed_proposals:
+      - github_create_branch
+      - github_push_files
+      - github_create_pull_request
     out:
-      pr_url: string
       branch: string
+      title: string
       summary: string
 
-  # A notification for the open draft PR: the hold posts to Slack with the issue link, and the gate
-  # panel shows the PR link and the summary. Nothing runs after it; approve or reject only ends the run.
-  - id: review_pr
+  # The person sees the proposed branch, commit (every changed file) and pull request here, and
+  # approves or rejects in the Trellis UI; the hold is posted to Slack. A reject ends the run and
+  # nothing is written.
+  - id: approve_pr
     kind: gate
     depends_on: [implement]
     in:
-      pull_request: ${step.implement.pr_url}
+      issue: ${workflow.input.raw.issue.html_url}
+      title: ${step.implement.title}
       branch: ${step.implement.branch}
       summary: ${step.implement.summary}
-      issue: ${workflow.input.raw.issue.html_url}
+      proposals: ${step.implement.proposals}
     out:
       outcome: enum[approve, reject]
       feedback: string
+
+  # Performs what the gate approved, in order: the branch, the commit, the draft pull request.
+  - id: open_pr
+    kind: deterministic
+    depends_on: [approve_pr]
+    in:
+      proposals: ${step.approve_pr.approved}
+    run:
+      - ${in.proposals}
