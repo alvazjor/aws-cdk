@@ -1,0 +1,33 @@
+# Demo: implement an issue when alvazjor adds the label trellis-implement. A Strands agent makes a
+# small change and opens a DRAFT pull request on the fork. No build, no tests, no gate: the agent
+# writes the branch, the commit and the pull request itself (create_branch, push_files,
+# create_pull_request are its only write tools).
+version: 1
+enabled: true
+description: Implement an issue labeled trellis-implement and open a draft PR on the fork, with no build, tests or gate.
+
+on:
+  platform: github
+  entity: issue
+  action: labeled
+  filter: "workflow.input.raw.label.name == 'trellis-implement' && workflow.input.data.state == 'open'"  # only adding that label starts it
+
+steps:
+  - id: implement
+    kind: agent
+    agent: strands/implementer
+    instruction: |
+      Implement the issue in your inputs and open a draft pull request, as your agent instructions
+      describe. Submit pr_url, branch and summary.
+    in:
+      owner: alvazjor
+      repo: aws-cdk
+      number: ${workflow.input.subject.number}
+      title: ${workflow.input.data.title}
+      body: ${workflow.input.raw.issue.body}
+      url: ${workflow.input.raw.issue.html_url}
+      branch: trellis/implement-issue-${workflow.input.subject.number}
+    out:
+      pr_url: string
+      branch: string
+      summary: string
