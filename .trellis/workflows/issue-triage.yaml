@@ -1,0 +1,75 @@
+# Demo: triage a new issue on alvazjor's CDK fork. Nothing is posted to GitHub yet: the agent writes
+# its triage as step output, a person approves it at the gate, and the last step only logs what it
+# would post. Posting is added later.
+version: 1
+enabled: true
+description: Triage a new issue with a Strands agent, hold the triage at a gate, then log the comment and labels it would post.
+
+on:
+  platform: github
+  entity: issue
+  action: [opened, reopened]
+  filter: "workflow.input.data.state == 'open'"
+
+steps:
+  - id: triage
+    kind: agent
+    agent: strands/triager
+    instruction: |
+      Triage the GitHub issue in your inputs, as your agent instructions describe. Fill every output:
+      kind, area, priority, effort, labels (comma separated, the labels you would add), files (the
+      paths you read that matter, comma separated), summary (two or three sentences) and comment
+      (the comment a maintainer would post, in Markdown).
+    in:
+      number: ${workflow.input.subject.number}
+      title: ${workflow.input.data.title}
+      author: ${workflow.input.data.author}
+      labels: ${workflow.input.data.labels}
+      body: ${workflow.input.raw.issue.body}
+      url: ${workflow.input.raw.issue.html_url}
+    out:
+      kind: enum[bug, feature-request, guidance, documentation]
+      area: string
+      priority: enum[p1, p2, p3]
+      effort: enum[effort/small, effort/medium, effort/large]
+      labels: string
+      files: string
+      summary: string
+      comment: string
+
+  # The person sees the triage here and approves or rejects it in the Trellis UI.
+  - id: approve
+    kind: gate
+    depends_on: [triage]
+    in:
+      issue: ${workflow.input.raw.issue.html_url}
+      summary: ${step.triage.summary}
+      labels: ${step.triage.labels}
+      comment: ${step.triage.comment}
+    out:
+      outcome: enum[approve, reject]
+      feedback: string
+
+  - id: would_post
+    kind: deterministic
+    depends_on: [approve]
+    when: "step.approve.outcome == 'approve'"
+    in:
+      number: ${workflow.input.subject.number}
+      labels: ${step.triage.labels}
+      comment: ${step.triage.comment}
+    run: |
+      echo "would post: labels on issue #${in.number}: ${in.labels}"
+      echo "would post: comment on issue #${in.number}:"
+      printf '%s\n' "${in.comment}"
+
+  - id: rejected
+    kind: deterministic
+    depends_on: [approve]
+    when: "step.approve.outcome == 'reject'"
+    in:
+      number: ${workflow.input.subject.number}
+      feedback: ${step.approve.feedback}
+    run: |
+      echo "rejected at the gate: nothing would be posted on issue #${in.number}"
+      echo "feedback: ${in.feedback}"
