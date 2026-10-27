@@ -1,16 +1,17 @@
-# Demo: implement an issue when alvazjor adds the label trellis-implement. A Strands agent makes a
-# small change and opens a DRAFT pull request on the fork. No build, no tests, no gate: the agent
+# Demo: implement a triaged bug as a fast follow-up. When an open issue carries both `bug` (the triage
+# sets it) and `ready-to-implement` (alvazjor adds it), a Strands agent makes a small change and opens
+# a DRAFT pull request on the fork. No build, no tests, no gate: the agent
 # writes the branch, the commit and the pull request itself (create_branch, push_files,
 # create_pull_request are its only write tools).
 version: 1
 enabled: true
-description: Implement an issue labeled trellis-implement and open a draft PR on the fork, with no build, tests or gate.
+description: Implement an open bug labeled ready-to-implement and open a draft PR on the fork, with no build, tests or gate.
 
 on:
   platform: github
   entity: issue
   action: labeled
-  filter: "workflow.input.raw.label.name == 'trellis-implement' && workflow.input.data.state == 'open'"  # only adding that label starts it
+  filter: "workflow.input.data.state == 'open' && 'bug' in workflow.input.data.labels && 'ready-to-implement' in workflow.input.data.labels && workflow.input.raw.label.name in ['bug', 'ready-to-implement']"  # starts when the second of the two labels is added
 
 steps:
   - id: implement
