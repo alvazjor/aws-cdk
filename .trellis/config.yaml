@@ -5,9 +5,10 @@ engine:
   step_timeout_seconds: 1800
 github:
   repository: alvazjor/aws-cdk
-  # The daemon acts as alvazjor (his gh token), and his own issues and PRs are the triggers here,
-  # so no login is listed.
-  self_logins: []
+  # The daemon acts as alvazjor (his gh token), so his login is Trellis's own: events he causes are
+  # dropped unless a workflow lists the entity in on.self_events. The demo workflows list theirs, so
+  # his test issues and PRs still start runs.
+  self_logins: [alvazjor]
 webhook:
   port: 8782
 routing:
