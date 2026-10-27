@@ -1,4 +1,4 @@
-version: 1
+version: 2
 enabled: true
 description: Welcome new issue authors with a friendly message saying we'll review and triage their issue shortly.
 on:
@@ -13,10 +13,11 @@ steps:
       author: ${workflow.input.data.author}
       number: ${workflow.input.subject.number}
       issue_url: ${workflow.input.subject.url}
+      repo: ${workflow.input.source}
     run:
       - |
-        gh issue comment "${in.number}" --body "Hi @${in.author}! 👋
+        gh issue comment "${in.number}" --repo "${in.repo}" --body "Hi @${in.author}! 👋
 
         Thank you for opening this issue. We'll review and triage it shortly."
 
-        echo "Posted welcome comment to issue #${in.number} for @${in.author}"
+        echo "Posted welcome comment to issue #${in.number} for @${in.author} in ${in.repo}"
