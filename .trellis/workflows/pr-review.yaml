@@ -32,7 +32,7 @@ steps:
       head_branch: ${workflow.input.data.head_branch}
       head_sha: ${workflow.input.data.head_sha}
       body: ${workflow.input.raw.pull_request.body}
-      url: ${workflow.input.raw.pull_request.html_url}
+      url: ${workflow.input.subject.url}
     out:
       verdict: enum[approve, comment, request-changes]
       blocking: int
@@ -44,7 +44,7 @@ steps:
     kind: gate
     depends_on: [review]
     in:
-      pull_request: ${workflow.input.raw.pull_request.html_url}
+      pull_request: ${workflow.input.subject.url}
       verdict: ${step.review.verdict}
       summary: ${step.review.summary}
       review: ${step.review.review}

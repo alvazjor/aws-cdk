@@ -30,7 +30,7 @@ steps:
       title: ${workflow.input.data.title}
       author: ${workflow.input.data.author}
       labels: ${workflow.input.data.labels}
-      url: ${workflow.input.raw.issue.html_url}
+      url: ${workflow.input.subject.url}
     allowed_proposals:
       - github_issue_write
       - github_add_issue_comment
@@ -51,7 +51,7 @@ steps:
     kind: gate
     depends_on: [triage]
     in:
-      issue: ${workflow.input.raw.issue.html_url}
+      issue: ${workflow.input.subject.url}
       summary: ${step.triage.summary}
       track: ${step.triage.track}
       classification: ${step.triage.classification}

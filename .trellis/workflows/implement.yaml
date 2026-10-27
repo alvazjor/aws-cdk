@@ -37,8 +37,7 @@ steps:
       repo: aws-cdk
       number: ${workflow.input.subject.number}
       title: ${workflow.input.data.title}
-      body: ${workflow.input.raw.issue.body}
-      url: ${workflow.input.raw.issue.html_url}
+      url: ${workflow.input.subject.url}
       branch: trellis/implement-issue-${workflow.input.subject.number}
     allowed_proposals:
       - github_create_branch
@@ -56,7 +55,7 @@ steps:
     kind: gate
     depends_on: [implement]
     in:
-      issue: ${workflow.input.raw.issue.html_url}
+      issue: ${workflow.input.subject.url}
       title: ${step.implement.title}
       branch: ${step.implement.branch}
       summary: ${step.implement.summary}

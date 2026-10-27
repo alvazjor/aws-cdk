@@ -12,7 +12,7 @@ routing:
 store:
   path: /tmp/trellis-demo-runs/trellis.db                # run database; run clones and agent copies go in its folder
 sweep:
-  interval_seconds: 1800                                 # checks GitHub for missed events every 30 minutes
+  interval_seconds: 43200                                # checks GitHub for missed events every 12 hours (the default)
 providers:
   default: bedrock-demo
   entries:
