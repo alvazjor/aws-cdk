@@ -1,3 +1,4 @@
+# Trellis for the demo on alvazjor's CDK fork.
 engine:
   max_concurrent_runs: 2
   step_timeout_seconds: 1800                             # 30 minutes per step attempt
