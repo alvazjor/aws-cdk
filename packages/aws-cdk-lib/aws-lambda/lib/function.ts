@@ -436,6 +436,8 @@ export interface FunctionOptions extends EventInvokeConfigOptions {
   /**
    * The maximum of concurrent executions you want to reserve for the function.
    *
+   * Set it to 0 to throttle every invocation of the function.
+   *
    * @default - No specific limit - account limit.
    * @see https://docs.aws.amazon.com/lambda/latest/dg/concurrent-executions.html
    */
@@ -990,6 +992,10 @@ export class Function extends FunctionBase {
     });
     // Enhanced CDK Analytics Telemetry
     addConstructMetadata(this, props);
+
+    if (props.reservedConcurrentExecutions !== undefined && props.reservedConcurrentExecutions < 0) {
+      throw new Error(`reservedConcurrentExecutions must be 0 or more, got ${props.reservedConcurrentExecutions}`);
+    }
 
     if (props.functionName && !Token.isUnresolved(props.functionName)) {
       if (props.functionName.length > 64) {
