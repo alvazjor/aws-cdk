@@ -1,11 +1,11 @@
 # Demo: triage a new issue on alvazjor's CDK fork with the CDK issue triage skill
 # (.trellis/skills/cdk-issue-triage.md, built into the triager agent by scripts/build-triager.py).
-# First `notice` comments on the issue that the triage has started. The agent then reads the issue and aws/aws-cdk through the GitHub MCP server and PROPOSES two writes on
-# the fork issue: the label change and the triage comment. A person sees both proposals at the gate;
-# on approve, `apply` performs them on the fork. A reject ends the run and nothing is written.
+# First `notice` comments on the issue that the triage has started. The agent then reads the issue
+# and aws/aws-cdk through the GitHub MCP server, sets the labels and posts the triage comment on the
+# fork issue itself. No gate: nothing is reviewed before it is written.
 version: 1
 enabled: true
-description: Tell the author the triage has started, triage the issue with the CDK issue triage skill; after approval at the gate, set the proposed labels and post the triage comment on the fork issue.
+description: Tell the author the triage has started, triage the issue with the CDK issue triage skill, then set the labels and post the triage comment on the fork issue.
 
 on:
   platform: github
@@ -33,10 +33,10 @@ steps:
     agent: strands/triager
     instruction: |
       Triage the GitHub issue in your inputs with the CDK issue triage skill, as your agent
-      instructions describe. Propose the label change with github_issue_write and the comment with
-      github_add_issue_comment (both proposal-only), then submit every output: track, classification, priority, reproduction, labels_added and
+      instructions describe. Set the labels with github_issue_write and post the comment with
+      github_add_issue_comment, then submit every output: track, classification, priority, reproduction, labels_added and
       labels_removed (comma separated, empty when none), summary (two or three sentences), comment
-      (the Proposed Response, the same text you proposed) and report (the full triage report).
+      (the Proposed Response, the same text you posted) and report (the full triage report).
     in:
       owner: alvazjor
       repo: aws-cdk
@@ -45,9 +45,6 @@ steps:
       author: ${workflow.input.data.author}
       labels: ${workflow.input.data.labels}
       url: ${workflow.input.subject.url}
-    allowed_proposals:
-      - github_issue_write
-      - github_add_issue_comment
     out:
       track: enum[already-fixed, duplicate, feature-request-with-pr, security, synth-time-bug, missing-context, full-triage]
       classification: enum[bug, feature, docs, question, working-as-intended]
@@ -58,33 +55,3 @@ steps:
       summary: string
       comment: string
       report: artifact
-
-  # The person sees the triage and both proposals (labels and comment) here, and approves or rejects
-  # in the Trellis UI. A reject ends the run here: nothing is written.
-  - id: approve
-    kind: gate
-    depends_on: [triage]
-    in:
-      issue: ${workflow.input.subject.url}
-      summary: ${step.triage.summary}
-      track: ${step.triage.track}
-      classification: ${step.triage.classification}
-      priority: ${step.triage.priority}
-      reproduction: ${step.triage.reproduction}
-      labels_added: ${step.triage.labels_added}
-      labels_removed: ${step.triage.labels_removed}
-      comment: ${step.triage.comment}
-      proposals: ${step.triage.proposals}
-    out:
-      outcome: enum[approve, reject]
-      feedback: string
-
-  # Performs what the gate approved, in the order the agent proposed it: the label change and the
-  # comment on the fork issue.
-  - id: apply
-    kind: deterministic
-    depends_on: [approve]
-    in:
-      proposals: ${step.approve.approved}
-    run:
-      - ${in.proposals}
