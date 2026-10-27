@@ -20,3 +20,8 @@ providers:
       type: bedrock                                      # account 963884676929 (ada-cdk)
       region: us-east-1
       credential: { source: aws-default-chain }          # served by demo.sh's loopback credential endpoint
+notifications:
+  slack:
+    bot_token_env: TRELLIS_SLACK_BOT_TOKEN                # the hive Slack app's bot (bienen2); demo.sh sets it
+    channel: C0CCPKSUN3B                                  # held gates and failed runs are posted here
+    dashboard_url: https://alvazjor-trellis-demo-ui.w.tunnels.lab.aws.dev   # base of each post's "Open in Trellis" link
