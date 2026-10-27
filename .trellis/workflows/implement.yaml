@@ -5,13 +5,18 @@
 # create_pull_request are its only write tools).
 version: 1
 enabled: true
-description: Implement an open bug labeled ready-to-implement and open a draft PR on the fork, with no build, tests or gate.
+description: Implement an open issue labeled both bug and ready-to-implement, in either order, and open a draft PR on the fork, with no build, tests or gate.
 
 on:
   platform: github
   entity: issue
   action: labeled
-  filter: "workflow.input.data.state == 'open' && 'bug' in workflow.input.data.labels && 'ready-to-implement' in workflow.input.data.labels && workflow.input.raw.label.name in ['bug', 'ready-to-implement']"  # starts when the second of the two labels is added
+  filter: "workflow.input.data.state == 'open' && 'bug' in workflow.input.data.labels && 'ready-to-implement' in workflow.input.data.labels && workflow.input.raw.label.name in ['bug', 'ready-to-implement'] && workflow.input.actor in ['alvazjor', 'trellis-poc']"  # the second of the two labels was just added, by alvazjor or the triage
+  self_events: [issue]                 # the triage sets `bug` as trellis-poc, Trellis's own login
+  ignore_global_filter: true           # routing.user_filter passes only alvazjor; the filter above also allows trellis-poc
+  concurrency:
+    group: implement-${workflow.input.subject.number}
+    policy: cancel-outdated            # both labels added at once: the later event's run replaces the earlier one
 
 steps:
   - id: implement
