@@ -1,11 +1,11 @@
 # Demo: triage a new issue on alvazjor's CDK fork with the CDK issue triage skill
 # (.trellis/skills/cdk-issue-triage.md, built into the triager agent by scripts/build-triager.py).
-# The agent reads the issue and aws/aws-cdk through the GitHub MCP server and PROPOSES two writes on
+# First `notice` comments on the issue that the triage has started. The agent then reads the issue and aws/aws-cdk through the GitHub MCP server and PROPOSES two writes on
 # the fork issue: the label change and the triage comment. A person sees both proposals at the gate;
 # on approve, `apply` performs them on the fork. A reject ends the run and nothing is written.
 version: 1
 enabled: true
-description: Triage a new issue with the CDK issue triage skill; after approval at the gate, set the proposed labels and post the triage comment on the fork issue.
+description: Tell the author the triage has started, triage the issue with the CDK issue triage skill; after approval at the gate, set the proposed labels and post the triage comment on the fork issue.
 
 on:
   platform: github
@@ -14,8 +14,22 @@ on:
   filter: "workflow.input.data.state == 'open'"
 
 steps:
+  # Tells the author, as trellis-poc, that the triage has started, a few seconds after the issue opens.
+  - id: notice
+    kind: deterministic
+    in:
+      repo: ${workflow.input.source}
+      number: ${workflow.input.subject.number}
+      author: ${workflow.input.data.author}
+    run:
+      - |
+        gh issue comment "${in.number}" --repo "${in.repo}" --body "Hi @${in.author},
+
+        Thanks for opening this issue. We are triaging it now: we read the report, check the CDK source for the cause, look for duplicates and existing fixes, and try a quick reproduction when we can. We will be back shortly with the triage report and the next steps."
+
   - id: triage
     kind: agent
+    depends_on: [notice]
     agent: strands/triager
     instruction: |
       Triage the GitHub issue in your inputs with the CDK issue triage skill, as your agent
