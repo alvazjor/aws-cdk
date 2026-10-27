@@ -1,23 +1,21 @@
-# Trellis for the demo on alvazjor's CDK fork. The daemon runs from this checkout through
-# /workplace/alvazjor/trellis-demo/scripts/demo.sh; the runbook is trellis-demo/reports/demo-runbook.md.
 engine:
   max_concurrent_runs: 2
-  step_timeout_seconds: 1800
+  step_timeout_seconds: 1800                             # 30 minutes per step attempt
 github:
   repository: alvazjor/aws-cdk
-  self_logins: [alvazjor]
+  self_logins: [alvazjor]                                # the daemon acts as alvazjor; workflows opt in with self_events
 webhook:
-  port: 8782
+  port: 8782                                             # the GitHub forward delivers here
+routing:
+  user_filter: "workflow.input.actor == 'alvazjor'"      # only events alvazjor causes start runs
 store:
-  path: /tmp/trellis-demo-runs/trellis.db
+  path: /tmp/trellis-demo-runs/trellis.db                # run database; run clones and agent copies go in its folder
 sweep:
-  interval_seconds: 1800
+  interval_seconds: 1800                                 # checks GitHub for missed events every 30 minutes
 providers:
   default: bedrock-demo
   entries:
-    # Account 963884676929 (ada-cdk). The credential reaches the agents through the loopback
-    # credential endpoint demo.sh starts (AWS_CONTAINER_CREDENTIALS_FULL_URI).
     - name: bedrock-demo
-      type: bedrock
+      type: bedrock                                      # account 963884676929 (ada-cdk)
       region: us-east-1
-      credential: { source: aws-default-chain }
+      credential: { source: aws-default-chain }          # served by demo.sh's loopback credential endpoint
