@@ -5,7 +5,7 @@
 # create_pull_request are its only write tools).
 version: 1
 enabled: true
-description: Implement an open issue labeled both bug and ready-to-implement, in either order, and open a draft PR on the fork, with no build, tests or gate.
+description: Implement an open issue labeled both bug and ready-to-implement, in either order, open a draft PR on the fork with no build or tests, and hold at review_pr so Slack announces it.
 
 on:
   platform: github
@@ -44,3 +44,17 @@ steps:
       pr_url: string
       branch: string
       summary: string
+
+  # A notification for the open draft PR: the hold posts to Slack with the issue link, and the gate
+  # panel shows the PR link and the summary. Nothing runs after it; approve or reject only ends the run.
+  - id: review_pr
+    kind: gate
+    depends_on: [implement]
+    in:
+      pull_request: ${step.implement.pr_url}
+      branch: ${step.implement.branch}
+      summary: ${step.implement.summary}
+      issue: ${workflow.input.raw.issue.html_url}
+    out:
+      outcome: enum[approve, reject]
+      feedback: string
