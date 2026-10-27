@@ -1,0 +1,20 @@
+version: 1
+enabled: true
+description: Greet the author of new issues and let them know the issue will be triaged shortly.
+on:
+  platform: github
+  entity: issue
+  action: [opened]
+  filter: workflow.input.data.state == 'open'
+steps:
+  - id: greet
+    kind: deterministic
+    in:
+      repo: ${workflow.input.source}
+      number: ${workflow.input.subject.number}
+      author: ${workflow.input.data.author}
+    run:
+      - |
+        gh issue comment "${in.number}" --repo "${in.repo}" --body "Hi @${in.author}! 👋
+
+        Thank you for opening this issue. Our team will triage it shortly and get back to you soon."
