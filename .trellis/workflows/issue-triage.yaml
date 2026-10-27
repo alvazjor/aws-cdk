@@ -1,9 +1,12 @@
-# Demo: triage a new issue on alvazjor's CDK fork. Nothing is posted to GitHub yet: the agent writes
-# its triage as step output, a person approves it at the gate, and the last step only logs what it
-# would post. Posting is added later.
+# Demo: triage a new issue on alvazjor's CDK fork with the CDK issue triage skill
+# (.trellis/skills/cdk-issue-triage.md, built into the triager agent by scripts/build-triager.py).
+# The agent reads the issue and aws/aws-cdk through the GitHub MCP server and PROPOSES the label
+# change; check_proposals refuses anything but a label change on this issue of the fork; a person
+# approves at the gate; apply_labels performs the approved proposal on the fork. The comment is not
+# posted: would_post only logs it.
 version: 1
 enabled: true
-description: Triage a new issue with a Strands agent, hold the triage at a gate, then log the comment and labels it would post.
+description: Triage a new issue with the CDK issue triage skill, approve the proposed label change at a gate, apply it on the fork, and log the comment it would post.
 
 on:
   platform: github
@@ -16,50 +19,95 @@ steps:
     kind: agent
     agent: strands/triager
     instruction: |
-      Triage the GitHub issue in your inputs, as your agent instructions describe. Fill every output:
-      kind, area, priority, effort, labels (comma separated, the labels you would add), files (the
-      paths you read that matter, comma separated), summary (two or three sentences) and comment
-      (the comment a maintainer would post, in Markdown).
+      Triage the GitHub issue in your inputs with the CDK issue triage skill, as your agent
+      instructions describe. Propose the label change with github_issue_write (proposal-only), then
+      submit every output: track, classification, priority, reproduction, labels_added and
+      labels_removed (comma separated, empty when none), summary (two or three sentences), comment
+      (the Proposed Response, exactly as it would be posted) and report (the full triage report).
     in:
+      owner: alvazjor
+      repo: aws-cdk
       number: ${workflow.input.subject.number}
       title: ${workflow.input.data.title}
       author: ${workflow.input.data.author}
       labels: ${workflow.input.data.labels}
-      body: ${workflow.input.raw.issue.body}
       url: ${workflow.input.raw.issue.html_url}
+    allowed_proposals:
+      - github_issue_write
     out:
-      kind: enum[bug, feature-request, guidance, documentation]
-      area: string
-      priority: enum[p1, p2, p3]
-      effort: enum[effort/small, effort/medium, effort/large]
-      labels: string
-      files: string
+      track: enum[already-fixed, duplicate, feature-request-with-pr, security, synth-time-bug, missing-context, full-triage]
+      classification: enum[bug, feature, docs, question, working-as-intended]
+      priority: enum[p1, p2, none]
+      reproduction: enum[reproduced, not-reproduced, not-attempted]
+      labels_added: string
+      labels_removed: string
       summary: string
       comment: string
+      report: artifact
 
-  # The person sees the triage here and approves or rejects it in the Trellis UI.
+  # Refuses the run before the gate unless every proposal is a label change on this issue of the fork,
+  # with labels that exist there. Writes nothing.
+  - id: check_proposals
+    kind: deterministic
+    depends_on: [triage]
+    in:
+      number: ${workflow.input.subject.number}
+      proposals: ${step.triage.proposals}
+    run: |
+      p="${in.proposals}"
+      n="${in.number}"
+      if ! jq -e --argjson n "$n" 'all(.[]; .server == "github" and .tool == "issue_write"
+          and ((.params | keys) - ["method", "owner", "repo", "issue_number", "labels"] | length == 0)
+          and .params.method == "update" and .params.owner == "alvazjor" and .params.repo == "aws-cdk"
+          and .params.issue_number == $n and (.params.labels | type == "array"))' <<<"$p" >/dev/null; then
+        echo "refused: a proposal is not a label change on alvazjor/aws-cdk#$n"
+        jq -c '.[] | {tool, server, params}' <<<"$p"
+        exit 1
+      fi
+      fork=$(gh api --paginate repos/alvazjor/aws-cdk/labels --jq '.[].name')
+      missing=$(jq -r '.[].params.labels[]' <<<"$p" | grep -vxF -f <(printf '%s\n' "$fork") || true)
+      if [ -n "$missing" ]; then
+        echo "refused: labels that do not exist on alvazjor/aws-cdk: $missing"
+        exit 1
+      fi
+      echo "proposals ok: $(jq length <<<"$p") label change(s) on alvazjor/aws-cdk#$n"
+      jq -r '.[] | "  labels after: \(.params.labels | join(", "))  (\(.reason))"' <<<"$p"
+
+  # The person sees the triage and the proposed labels here, and approves or rejects in the Trellis UI.
+  # A reject ends the run here: no label changes, nothing logged.
   - id: approve
     kind: gate
-    depends_on: [triage]
+    depends_on: [triage, check_proposals]
     in:
       issue: ${workflow.input.raw.issue.html_url}
       summary: ${step.triage.summary}
-      labels: ${step.triage.labels}
+      track: ${step.triage.track}
+      classification: ${step.triage.classification}
+      priority: ${step.triage.priority}
+      reproduction: ${step.triage.reproduction}
+      labels_added: ${step.triage.labels_added}
+      labels_removed: ${step.triage.labels_removed}
       comment: ${step.triage.comment}
+      proposals: ${step.triage.proposals}
     out:
       outcome: enum[approve, reject]
       feedback: string
 
-  # Runs after an approve. A reject ends the run at the gate, with the person's feedback.
-  - id: would_post
+  # Performs what the gate approved: the label change on the fork issue.
+  - id: apply_labels
     kind: deterministic
     depends_on: [approve]
     in:
+      proposals: ${step.approve.approved}
+    run:
+      - ${in.proposals}
+
+  - id: would_post
+    kind: deterministic
+    depends_on: [apply_labels]
+    in:
       number: ${workflow.input.subject.number}
-      labels: ${step.triage.labels}
       comment: ${step.triage.comment}
     run: |
-      echo "would post: labels on issue #${in.number}: ${in.labels}"
       echo "would post: comment on issue #${in.number}:"
       printf '%s\n' "${in.comment}"
-
