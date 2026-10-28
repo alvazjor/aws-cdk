@@ -57,3 +57,23 @@ steps:
       summary: string
       comment: string
       report: artifact
+
+  # Keeps what the triage agent did. Trellis deletes a run's transcripts when the run ends, so this step
+  # reads the agent's last attempt (mounted read-only at /trellis/transcripts), prints its tool calls to
+  # the log and keeps them, with the token counts, as outputs, which stay in the run store.
+  - id: record
+    kind: deterministic
+    depends_on: [triage]
+    out:
+      tool_calls: int
+      calls: string
+      metrics: string
+    run:
+      - |
+        a=$(ls -d /trellis/transcripts/triage/0/*/ | sort -t/ -k6 -n | tail -1)
+        t="$a/transcript.jsonl"
+        calls=$(jq -sc '[.[] | .update | select(.sessionUpdate == "tool_call" or .sessionUpdate == "tool_call_update")] | group_by(.toolCallId) | map({title: (map(.title // empty) | first), status: (map(.status // empty) | last), input: (map(.rawInput // empty) | first | tostring | .[0:300])})' "$t")
+        echo "$calls" | jq -r '.[] | "\(.status // "-")  \(.title)  \(.input)"'
+        echo "tool_calls=$(echo "$calls" | jq length)" >> "$TRELLIS_OUTPUT"
+        echo "calls=$calls" >> "$TRELLIS_OUTPUT"
+        echo "metrics=$(jq -c . "$a/metrics.json")" >> "$TRELLIS_OUTPUT"
