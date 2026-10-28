@@ -1,6 +1,6 @@
 # Trellis for the demo on alvazjor's CDK fork.
 engine:
-  max_concurrent_runs: 2
+  max_concurrent_runs: 4
   step_timeout_seconds: 1800                             # 30 minutes per step attempt
 github:
   repository: alvazjor/aws-cdk
