@@ -72,7 +72,7 @@ steps:
       - |
         a=$(ls -d /trellis/transcripts/triage/0/*/ | sort -t/ -k6 -n | tail -1)
         t="$a/transcript.jsonl"
-        calls=$(jq -sc '[.[] | .update | select(.sessionUpdate == "tool_call" or .sessionUpdate == "tool_call_update")] | group_by(.toolCallId) | map({title: (map(.title // empty) | first), status: (map(.status // empty) | last), input: (map(.rawInput // empty) | first | tostring | .[0:300])})' "$t")
+        calls=$(jq -sc '[.[] | .update | select(.sessionUpdate == "tool_call" or .sessionUpdate == "tool_call_update")] | reduce .[] as $u ({order: [], by: {}}; (if .by[$u.toolCallId] == null then .order += [$u.toolCallId] else . end) | .by[$u.toolCallId] += [$u]) | .by as $b | [.order[] | $b[.] | {title: (map(.title // empty) | first), status: (map(.status // empty) | last), input: (map(.rawInput // empty) | first | tostring | .[0:300])}]' "$t")
         echo "$calls" | jq -r '.[] | "\(.status // "-")  \(.title)  \(.input)"'
         echo "tool_calls=$(echo "$calls" | jq length)" >> "$TRELLIS_OUTPUT"
         echo "calls=$calls" >> "$TRELLIS_OUTPUT"
