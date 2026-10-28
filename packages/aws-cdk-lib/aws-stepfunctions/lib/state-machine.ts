@@ -474,6 +474,8 @@ export class StateMachine extends StateMachineBase {
     }
 
     // TrustPolicy - https://docs.aws.amazon.com/step-functions/latest/dg/procedure-create-iam-role.html#prevent-cross-service-confused-deputy
+    // Only aws:SourceArn is used: it already pins the account and region. aws:SourceAccount is not used because
+    // Step Functions sends the account of the task `credentials` role when it is in another account.
     const stack = Stack.of(this) ;
     this.role = props.role || new iam.Role(this, 'Role', {
       assumedBy: new iam.ServicePrincipal('states.amazonaws.com',
@@ -486,9 +488,6 @@ export class StateMachine extends StateMachineBase {
                 resourceName: '*',
                 arnFormat: ArnFormat.COLON_RESOURCE_NAME,
               }),
-            },
-            StringEquals: {
-              'aws:SourceAccount': stack.account,
             },
           },
         },
