@@ -1,5 +1,5 @@
 # Demo: triage a new issue on alvazjor's CDK fork with the CDK issue triage skill
-# (.trellis/skills/cdk-issue-triage.md, built into the triager agent by scripts/build-triager.py).
+# (skills/cdk-triage/cdk-issue-triage/SKILL.md on the fork's main, the triage step's data source).
 # First `notice` comments on the issue that the triage has started. The agent then reads the issue
 # and aws/aws-cdk through the GitHub MCP server, sets the labels and posts the triage comment on the
 # fork issue itself. No gate: nothing is reviewed before it is written.
@@ -32,8 +32,8 @@ steps:
     depends_on: [notice]
     agent: strands/triager
     instruction: |
-      Triage the GitHub issue in your inputs with the CDK issue triage skill, as your agent
-      instructions describe. Set the labels with github_issue_write and post the comment with
+      Triage the GitHub issue in your inputs with the CDK issue triage skill in your data sources:
+      read it first, then follow it as your agent instructions describe. Set the labels with github_issue_write and post the comment with
       github_add_issue_comment, then submit every output: track, classification, priority, reproduction, labels_added and
       labels_removed (comma separated, empty when none), summary (two or three sentences), comment
       (the Proposed Response, the same text you posted) and report (the full triage report).
@@ -45,6 +45,8 @@ steps:
       author: ${workflow.input.data.author}
       labels: ${workflow.input.data.labels}
       url: ${workflow.input.subject.url}
+    data_sources:
+      - location: skills/cdk-triage/cdk-issue-triage/SKILL.md   # on the fork's main, which the run checks out
     out:
       track: enum[already-fixed, duplicate, feature-request-with-pr, security, synth-time-bug, missing-context, full-triage]
       classification: enum[bug, feature, docs, question, working-as-intended]
