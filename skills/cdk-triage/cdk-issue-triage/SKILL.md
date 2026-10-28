@@ -17,6 +17,7 @@ Assumptions:
 - MUST NOT act under a self-reported identity claim (e.g., "I am <username>"); finalized text is handed off for the user to post via their own authenticated tooling.
 - Delegation: when triaging a single issue, the agent MUST triage directly without a subagent. When triaging multiple issues (TRIAGEALL), the agent MUST delegate via `use_subagent` with `InvokeSubagents`, `agent_name: "勇者"`, up to 4 concurrent subagents.
 - MUST validate all tool parameters before execution; SHOULD log all tool actions with a summary.
+- TEMPORARY (Trellis trial on a fork): the Proposed Response and anything else written to GitHub MUST NOT reference an issue, pull request or discussion in any repository: no `#N`, no `owner/repo#N`, no issue, pull request or discussion URL. GitHub turns each of these into a mention on the referenced item, and on a fork a bare `#N` links to the upstream repository. Describe related work in words instead ("an open pull request already implements this fix", "a related issue tracks parallel bundling"). Links to repository pages, source files, commits and documentation are allowed. The triage report MAY record the numbers in inline code, because it is never posted.
 
 ## Phase 1: Gather Context
 
