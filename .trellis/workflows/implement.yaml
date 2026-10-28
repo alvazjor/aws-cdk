@@ -3,7 +3,7 @@
 # PROPOSES the branch, the commit and a draft pull request on the fork. A person approves them at the
 # gate approve_pr (Slack announces the hold); open_pr then performs them. No build, no tests.
 version: 1
-enabled: true
+enabled: false
 description: Implement an open issue labeled both bug and ready-to-implement, in either order, and open a draft PR on the fork after approval at a gate. No build, no tests.
 
 on:

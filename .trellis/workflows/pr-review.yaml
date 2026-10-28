@@ -2,7 +2,7 @@
 # writes its review as step output, a person approves it at the gate, and the last step only logs
 # the review it would post. Posting is added later.
 version: 1
-enabled: true
+enabled: false
 description: Review a pull request into main with a Strands agent, hold the review at a gate, then log the review it would post.
 
 on:
