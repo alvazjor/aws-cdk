@@ -1,0 +1,1984 @@
+import fs from 'fs';
+import path from 'path';
+import { Construct } from 'constructs';
+import { Annotations, Match, Template } from '../../assertions';
+import * as iam from '../../aws-iam';
+import * as lambda from '../../aws-lambda';
+import * as s3 from '../../aws-s3';
+import * as s3_assets from '../../aws-s3-assets';
+import {
+  Annotations as CoreAnnotations,
+  App,
+  CfnCapabilities,
+  CfnOutput,
+  CfnParameter,
+  DefaultStackSynthesizer,
+  Stack,
+  Stage,
+  Validations,
+} from '../../core';
+import type { StackSynthesizer } from '../../core';
+import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '../../custom-resources';
+import * as cxapi from '../../cx-api';
+import type { StackSetStackProps } from '../lib';
+import {
+  DeploymentType,
+  NestedStack,
+  RegionConcurrencyType,
+  StackSet,
+  StackSetTarget,
+  StackSetTemplate,
+  StackSetStack,
+} from '../lib';
+
+class LambdaStackSet extends StackSetStack {
+  constructor(scope: Construct, id: string, props?: StackSetStackProps) {
+    super(scope, id, props);
+
+    new lambda.Function(this, 'Lambda', {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+    });
+
+    new lambda.Function(this, 'Lambda2', {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+    });
+  }
+}
+
+/**
+ * A StackSetStack is not a cloud assembly artifact, so read its template file from the assembly
+ */
+function stackSetTemplateOf(stackSetStack: StackSetStack): Template {
+  const assembly = Stage.of(stackSetStack)!.synth();
+  return Template.fromJSON(JSON.parse(fs.readFileSync(path.join(assembly.directory, stackSetStack.templateFile), 'utf-8')));
+}
+
+test('default', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+  });
+});
+
+test('stackset with parameters', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    parameters: {
+      Param1: 'Value1',
+      Param2: 'Value2',
+    },
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    Parameters: [{
+      ParameterKey: 'Param1',
+      ParameterValue: 'Value1',
+    }, {
+      ParameterKey: 'Param2',
+      ParameterValue: 'Value2',
+    }],
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+  });
+});
+
+test('self managed stackset creates adminRole by default', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    AdministrationRoleARN: { 'Fn::GetAtt': ['StackSetAdminRoleFDB48078', 'Arn'] },
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+  });
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+    AssumeRolePolicyDocument: {
+      Statement: [
+        {
+          Effect: 'Allow',
+          Principal: { Service: 'cloudformation.amazonaws.com' },
+          Action: 'sts:AssumeRole',
+        },
+      ],
+    },
+  });
+});
+
+test('self managed stackset with disabled regions', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1', 'af-south-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    AdministrationRoleARN: { 'Fn::GetAtt': ['StackSetAdminRoleFDB48078', 'Arn'] },
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1', 'af-south-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+  });
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+    AssumeRolePolicyDocument: {
+      Statement: [
+        {
+          Effect: 'Allow',
+          Principal: { Service: 'cloudformation.amazonaws.com' },
+          Action: 'sts:AssumeRole',
+        },
+        {
+          Effect: 'Allow',
+          Principal: { Service: 'cloudformation.af-south-1.amazonaws.com' },
+          Action: 'sts:AssumeRole',
+        },
+      ],
+    },
+  });
+});
+
+test('service managed stackset', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    deploymentType: DeploymentType.serviceManaged(),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SERVICE_MANAGED',
+    CallAs: 'DELEGATED_ADMIN',
+    AutoDeployment: {
+      Enabled: true,
+      RetainStacksOnAccountRemoval: true,
+    },
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      ParameterOverrides: [{
+        ParameterKey: 'Param1',
+        ParameterValue: 'Value1',
+      }],
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+        AccountFilterType: 'INTERSECTION',
+      },
+    }],
+  });
+});
+
+test('service managed stackset with options', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    deploymentType: DeploymentType.serviceManaged({
+      delegatedAdmin: false,
+      autoDeployEnabled: false,
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SERVICE_MANAGED',
+    CallAs: 'SELF',
+    AutoDeployment: {
+      Enabled: false,
+    },
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+        AccountFilterType: 'INTERSECTION',
+      },
+    }],
+  });
+});
+
+test('service managed stackset throws error if autoDeployRetainStacks is provided and autoDeploy is disabled', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  expect(() => {
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1'],
+        accounts: ['11111111111'],
+        parameterOverrides: {
+          Param1: 'Value1',
+        },
+      }),
+      deploymentType: DeploymentType.serviceManaged({
+        delegatedAdmin: false,
+        autoDeployEnabled: false,
+        autoDeployRetainStacks: true,
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+  }).toThrow(/autoDeployRetainStacks only applies if autoDeploy is enabled/);
+});
+
+test('fromOrganizations default', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    deploymentType: DeploymentType.serviceManaged({
+      delegatedAdmin: false,
+      autoDeployEnabled: false,
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SERVICE_MANAGED',
+    CallAs: 'SELF',
+    AutoDeployment: {
+      Enabled: false,
+    },
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'NONE',
+      },
+    }],
+  });
+});
+
+test('fromOrganizations with intersectionAccounts', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      intersectionAccounts: ['222222222222', '333333333333'],
+    }),
+    deploymentType: DeploymentType.serviceManaged({
+      delegatedAdmin: false,
+      autoDeployEnabled: false,
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'INTERSECTION',
+        OrganizationalUnitIds: ['ou-1111111'],
+        Accounts: ['222222222222', '333333333333'],
+      },
+    }],
+  });
+});
+
+test('fromOrganizations with additionalAccounts', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      additionalAccounts: ['222222222222', '333333333333'],
+    }),
+    deploymentType: DeploymentType.serviceManaged({
+      delegatedAdmin: false,
+      autoDeployEnabled: false,
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'UNION',
+        OrganizationalUnitIds: ['ou-1111111'],
+        Accounts: ['222222222222', '333333333333'],
+      },
+    }],
+  });
+});
+
+test('fromOrganizations with excludeAccounts', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      excludeAccounts: ['222222222222', '333333333333'],
+    }),
+    deploymentType: DeploymentType.serviceManaged({
+      delegatedAdmin: false,
+      autoDeployEnabled: false,
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'DIFFERENCE',
+        OrganizationalUnitIds: ['ou-1111111'],
+        Accounts: ['222222222222', '333333333333'],
+      },
+    }],
+  });
+});
+
+test('fromOrganizations throws when intersectionAccounts and excludeAccounts are both specified', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  expect(() => {
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromOrganizationalUnits({
+        regions: ['us-east-1'],
+        organizationalUnits: ['ou-1111111'],
+        intersectionAccounts: ['222222222222'],
+        excludeAccounts: ['333333333333'],
+      }),
+      deploymentType: DeploymentType.serviceManaged({
+        delegatedAdmin: false,
+        autoDeployEnabled: false,
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+  }).toThrow(/specify at most one of 'additionalAccounts', 'excludeAccounts', or 'intersectionAccounts'/);
+});
+
+test('fromOrganizations throws when intersectionAccounts and additionalAccounts are both specified', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  expect(() => {
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromOrganizationalUnits({
+        regions: ['us-east-1'],
+        organizationalUnits: ['ou-1111111'],
+        intersectionAccounts: ['222222222222'],
+        additionalAccounts: ['333333333333'],
+      }),
+      deploymentType: DeploymentType.serviceManaged({
+        delegatedAdmin: false,
+        autoDeployEnabled: false,
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+  }).toThrow(/specify at most one of 'additionalAccounts', 'excludeAccounts', or 'intersectionAccounts'/);
+});
+
+test('fromOrganizations throws when all three account filters are specified', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  expect(() => {
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromOrganizationalUnits({
+        regions: ['us-east-1'],
+        organizationalUnits: ['ou-1111111'],
+        intersectionAccounts: ['111111111111'],
+        excludeAccounts: ['222222222222'],
+        additionalAccounts: ['333333333333'],
+      }),
+      deploymentType: DeploymentType.serviceManaged({
+        delegatedAdmin: false,
+        autoDeployEnabled: false,
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+  }).toThrow(/specify at most one of 'additionalAccounts', 'excludeAccounts', or 'intersectionAccounts'/);
+});
+
+test('has IAM capabilities', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    capabilities: [CfnCapabilities.ANONYMOUS_IAM, CfnCapabilities.NAMED_IAM],
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+    Capabilities: [
+      'CAPABILITY_IAM',
+      'CAPABILITY_NAMED_IAM',
+    ],
+  });
+});
+
+test('requires asset bucket to be passed', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  expect(() => {
+    const lambdaStack = new LambdaStackSet(app, 'LambdaStack');
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1'],
+        accounts: ['11111111111'],
+      }),
+      template: StackSetTemplate.fromStackSetStack(lambdaStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM, CfnCapabilities.NAMED_IAM],
+    });
+  }).toThrow('an asset bucket must be provided to use file assets, set \'assetBuckets\' in the StackSetStack props');
+});
+
+test('test lambda assets with one asset bucket', () => {
+  const app = new App({
+    context: {
+      [cxapi.ASSET_RESOURCE_METADATA_ENABLED_CONTEXT]: true,
+    },
+  });
+  const stack = new Stack(app);
+  const lambdaStack = new LambdaStackSet(app, 'LambdaStack', {
+    assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'integ-assets')],
+    assetBucketPrefix: 'prefix',
+  });
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(lambdaStack),
+    capabilities: [CfnCapabilities.ANONYMOUS_IAM, CfnCapabilities.NAMED_IAM],
+  });
+
+  Template.fromStack(stack).resourceCountIs('Custom::CDKBucketDeployment', 1);
+});
+
+test('test lambda assets with two asset buckets', () => {
+  const app = new App({
+    context: {
+      [cxapi.ASSET_RESOURCE_METADATA_ENABLED_CONTEXT]: true,
+    },
+  });
+  const stack = new Stack(app);
+  const lambdaStack = new LambdaStackSet(app, 'LambdaStack', {
+    assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'integ-assets'), s3.Bucket.fromBucketName(stack, 'AssetBucket2', 'integ-assets2')],
+    assetBucketPrefix: 'prefix',
+  });
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(lambdaStack),
+    capabilities: [CfnCapabilities.ANONYMOUS_IAM, CfnCapabilities.NAMED_IAM],
+  });
+
+  Template.fromStack(stack).resourceCountIs('Custom::CDKBucketDeployment', 2);
+});
+
+test('stackset without target', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+  });
+
+  // No StackInstancesGroup should be present when no target is provided
+  const template = Template.fromStack(stack);
+  const stackSets = template.findResources('AWS::CloudFormation::StackSet');
+  const stackSetResource = Object.values(stackSets)[0];
+  expect(stackSetResource.Properties.StackInstancesGroup).toEqual([]);
+});
+
+test('stackset without target then addTarget', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  const stackSet = new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  stackSet.addTarget(StackSetTarget.fromAccounts({
+    regions: ['us-east-1'],
+    accounts: ['11111111111'],
+  }));
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+  });
+});
+
+test('passes operation preferences', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    operationPreferences: {
+      // In reality, you would not set all of these at once, but it allows us to test all the properties in one test case
+      regionConcurrencyType: RegionConcurrencyType.PARALLEL,
+      regionOrder: ['us-east-1', 'us-west-2'],
+      maxConcurrentPercentage: 50,
+      maxConcurrentCount: 5,
+      failureTolerancePercentage: 10,
+      failureToleranceCount: 1,
+    },
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    ManagedExecution: { Active: true },
+    PermissionModel: 'SELF_MANAGED',
+    OperationPreferences: {
+      RegionConcurrencyType: 'PARALLEL',
+      RegionOrder: ['us-east-1', 'us-west-2'],
+      MaxConcurrentPercentage: 50,
+      MaxConcurrentCount: 5,
+      FailureTolerancePercentage: 10,
+      FailureToleranceCount: 1,
+    },
+    TemplateURL: {
+      'Fn::Sub': 'https://s3.${AWS::Region}.${AWS::URLSuffix}/cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.json',
+    },
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        Accounts: ['11111111111'],
+      },
+    }],
+  });
+});
+
+test.each([
+  ['SEQUENTIAL', RegionConcurrencyType.SEQUENTIAL],
+  ['PARALLEL', RegionConcurrencyType.PARALLEL],
+])('renders the %s region concurrency type', (expected, regionConcurrencyType) => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    operationPreferences: { regionConcurrencyType },
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    OperationPreferences: { RegionConcurrencyType: expected },
+  });
+});
+
+test('passes a custom region concurrency type from of() through to the template', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    operationPreferences: { regionConcurrencyType: RegionConcurrencyType.of('CUSTOM') },
+  });
+  Validations.of(stack).acknowledge({ id: 'CloudFormation-Validate::W3030', reason: 'of() accepts values newer than the CloudFormation schema' });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    OperationPreferences: { RegionConcurrencyType: 'CUSTOM' },
+  });
+});
+
+test('omits operation preferences when none of its fields are set', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    operationPreferences: {},
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    OperationPreferences: Match.absent(),
+  });
+});
+
+test('empty additionalAccounts renders AccountFilterType NONE', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      additionalAccounts: [],
+    }),
+    deploymentType: DeploymentType.serviceManaged(),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'NONE',
+        OrganizationalUnitIds: ['ou-1111111'],
+      },
+    }],
+  });
+});
+
+test('empty excludeAccounts renders AccountFilterType NONE', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      excludeAccounts: [],
+    }),
+    deploymentType: DeploymentType.serviceManaged(),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'NONE',
+        OrganizationalUnitIds: ['ou-1111111'],
+      },
+    }],
+  });
+});
+
+test('empty intersectionAccounts renders AccountFilterType NONE', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      intersectionAccounts: [],
+    }),
+    deploymentType: DeploymentType.serviceManaged(),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+    StackInstancesGroup: [{
+      Regions: ['us-east-1'],
+      DeploymentTargets: {
+        AccountFilterType: 'NONE',
+        OrganizationalUnitIds: ['ou-1111111'],
+      },
+    }],
+  });
+});
+
+test('fromAccounts with empty array throws', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  expect(() => {
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1'],
+        accounts: [],
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+  }).toThrow('fromAccounts requires at least one account');
+});
+
+test('test stackset depends on role', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+      parameterOverrides: {
+        Param1: 'Value1',
+      },
+    }),
+    template: StackSetTemplate.fromStackSetStack(
+      new StackSetStack(app, 'Stack'),
+    ),
+  });
+
+  Template.fromStack(stack).hasResource('AWS::CloudFormation::StackSet', {
+    DependsOn: ['StackSetAdminRoleDefaultPolicy96A312F6', 'StackSetAdminRoleFDB48078'],
+  });
+});
+
+test('self managed stackset depends on the policy added to a supplied admin role', () => {
+  const app = new App();
+  const stack = new Stack(app);
+  const adminRole = iam.Role.fromRoleArn(stack, 'AdminRole', 'arn:aws:iam::123456789012:role/StackSetAdmin');
+
+  new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    deploymentType: DeploymentType.selfManaged({ adminRole }),
+  });
+
+  const template = Template.fromStack(stack);
+  template.hasResource('AWS::CloudFormation::StackSet', {
+    DependsOn: ['AdminRolePolicyB2FE8449'],
+  });
+});
+
+test('self managed stackset uses partition-aware ARN for execution role', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  // For env-agnostic stacks, formatArn produces a Fn::Join with AWS::Partition
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [
+        {
+          Effect: 'Allow',
+          Action: 'sts:AssumeRole',
+          Resource: {
+            'Fn::Join': [
+              '',
+              [
+                'arn:',
+                { Ref: 'AWS::Partition' },
+                ':iam::*:role/AWSCloudFormationStackSetExecutionRole',
+              ],
+            ],
+          },
+        },
+      ],
+    },
+  });
+});
+
+test('self managed stackset with custom execution role name uses partition-aware ARN', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    deploymentType: DeploymentType.selfManaged({
+      executionRoleName: 'CustomExecutionRole',
+    }),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [
+        {
+          Effect: 'Allow',
+          Action: 'sts:AssumeRole',
+          Resource: {
+            'Fn::Join': [
+              '',
+              ['arn:', { Ref: 'AWS::Partition' }, ':iam::*:role/CustomExecutionRole'],
+            ],
+          },
+        },
+      ],
+    },
+  });
+});
+
+test('GovCloud partition - self managed stackset with specific environment', () => {
+  const app = new App({
+    context: {
+      [cxapi.ENABLE_PARTITION_LITERALS]: true,
+    },
+  });
+  const stack = new Stack(app, 'TestStack', {
+    env: {
+      account: '111111111111',
+      region: 'us-gov-west-1',
+    },
+  });
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-gov-west-1'],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  // Verify that the ARN uses the correct partition for GovCloud (aws-us-gov)
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Policy', {
+    PolicyDocument: {
+      Statement: [
+        {
+          Effect: 'Allow',
+          Action: 'sts:AssumeRole',
+          Resource: 'arn:aws-us-gov:iam::*:role/AWSCloudFormationStackSetExecutionRole',
+        },
+      ],
+    },
+  });
+});
+
+test('lambda asset bucket name resolves the region dynamically in the stackset template', () => {
+  const app = new App({
+    context: {
+      [cxapi.ASSET_RESOURCE_METADATA_ENABLED_CONTEXT]: true,
+    },
+  });
+  const stage = new Stage(app, 'Stage', { env: { account: '123456789012', region: 'us-east-1' } });
+  const stack = new Stack(stage, 'Parent');
+  const lambdaStack = new LambdaStackSet(stage, 'LambdaStack', {
+    assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'prefix-us-east-1')],
+    assetBucketPrefix: 'prefix',
+  });
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(lambdaStack),
+    capabilities: [CfnCapabilities.ANONYMOUS_IAM, CfnCapabilities.NAMED_IAM],
+  });
+
+  app.synth();
+  const stackSetTemplate = JSON.parse(
+    fs.readFileSync(path.join(stage.outdir, lambdaStack.templateFile), 'utf-8'),
+  );
+
+  Template.fromJSON(stackSetTemplate).hasResourceProperties('AWS::Lambda::Function', {
+    Code: {
+      S3Bucket: {
+        'Fn::Join': ['-', ['prefix', { Ref: 'AWS::Region' }]],
+      },
+    },
+  });
+});
+
+test('lambda asset is staged to the parent asset bucket and copied via bucket deployment', () => {
+  const app = new App({
+    context: {
+      [cxapi.ASSET_RESOURCE_METADATA_ENABLED_CONTEXT]: true,
+    },
+  });
+  const stack = new Stack(app);
+  const lambdaStack = new LambdaStackSet(app, 'LambdaStack', {
+    assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'integ-assets')],
+    assetBucketPrefix: 'prefix',
+  });
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: ['us-east-1'],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(lambdaStack),
+    capabilities: [CfnCapabilities.ANONYMOUS_IAM, CfnCapabilities.NAMED_IAM],
+  });
+
+  Template.fromStack(stack).hasResourceProperties('Custom::CDKBucketDeployment', {
+    SourceBucketNames: [
+      { 'Fn::Sub': 'cdk-hnb659fds-assets-${AWS::AccountId}-${AWS::Region}' },
+    ],
+    DestinationBucketName: 'integ-assets',
+  });
+});
+
+describe('StackSet template asset object keys', () => {
+  interface AssetKeysOptions {
+    readonly synthesizer?: StackSynthesizer;
+    readonly context?: Record<string, unknown>;
+    readonly addAssets: (scope: Construct) => void;
+  }
+
+  function addLambda(scope: Construct, id: string, code: lambda.Code) {
+    new lambda.Function(scope, id, {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code,
+    });
+  }
+
+  function synthAssetKeys(options: AssetKeysOptions) {
+    const app = new App({ context: options.context });
+    const stack = new Stack(app, 'Parent', { synthesizer: options.synthesizer });
+    const stackSetStack = new StackSetStack(app, 'AssetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'prefix-us-east-1')],
+      assetBucketPrefix: 'prefix',
+    });
+
+    options.addAssets(stackSetStack);
+
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1'],
+        accounts: ['11111111111'],
+      }),
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+
+    app.synth();
+    const stackSetTemplate = JSON.parse(
+      fs.readFileSync(path.join(Stage.of(stack)!.outdir, stackSetStack.templateFile), 'utf-8'),
+    );
+    const templateKeys = [
+      ...Object.values(Template.fromJSON(stackSetTemplate).findResources('AWS::Lambda::Function'))
+        .map((resource) => resource.Properties.Code.S3Key),
+      ...Object.values(stackSetTemplate.Outputs ?? {}).map((output: any) => output.Value),
+    ];
+    const parentTemplate = Template.fromStack(stack);
+    const sourceKeys = Object.values(parentTemplate.findResources('Custom::CDKBucketDeployment'))
+      .flatMap((resource) => resource.Properties.SourceObjectKeys);
+
+    return { templateKeys, sourceKeys, parentTemplate };
+  }
+
+  // The handler (extract: false) writes each source object under its file name only
+  function expectKeysMatchCopiedFileNames(templateKeys: string[], sourceKeys: string[]) {
+    expect(templateKeys.length).toBeGreaterThan(0);
+    expect([...templateKeys].sort()).toEqual(sourceKeys.map((key) => path.posix.basename(key)).sort());
+  }
+
+  test.each([
+    ['no bucket prefix', new DefaultStackSynthesizer()],
+    ['a bucket prefix with a slash', new DefaultStackSynthesizer({ bucketPrefix: 'assets/' })],
+    ['a bucket with deploy-time/ prefix', new DefaultStackSynthesizer({ bucketPrefix: 'deploy-time/' })],
+    ['a bucket prefix without a slash', new DefaultStackSynthesizer({ bucketPrefix: 'myapp-' })],
+  ])('reference the file names the bucket deployment copies to, with %s', (_name, synthesizer) => {
+    const { templateKeys, sourceKeys } = synthAssetKeys({
+      synthesizer,
+      addAssets: (scope) => {
+        addLambda(scope, 'Lambda', lambda.Code.fromAsset(path.join(__dirname, 'lambda'), { assetHash: 'custom-hash' }));
+        const script = new s3_assets.Asset(scope, 'Script', { path: path.join(__dirname, 'stackset-script', 'script.py') });
+        new CfnOutput(scope, 'ScriptKey', { value: script.s3ObjectKey });
+      },
+    });
+
+    expect(sourceKeys).toHaveLength(2);
+    expectKeysMatchCopiedFileNames(templateKeys, sourceKeys);
+    expect(templateKeys.some((key: string) => key.endsWith('.py'))).toBe(true);
+  });
+
+  test('reference the file names the bucket deployment copies to, with an AwsCustomResource handler', () => {
+    const { templateKeys, sourceKeys } = synthAssetKeys({
+      addAssets: (scope) => {
+        addLambda(scope, 'Lambda', lambda.Code.fromAsset(path.join(__dirname, 'lambda'), { assetHash: 'custom-hash' }));
+        new AwsCustomResource(scope, 'CustomResource', {
+          onCreate: {
+            service: 'S3',
+            action: 'listBuckets',
+            physicalResourceId: PhysicalResourceId.of('id'),
+          },
+          policy: AwsCustomResourcePolicy.fromSdkCalls({ resources: AwsCustomResourcePolicy.ANY_RESOURCE }),
+        });
+      },
+    });
+
+    expect(sourceKeys).toHaveLength(2);
+    expectKeysMatchCopiedFileNames(templateKeys, sourceKeys);
+  });
+
+  test('reference the file names the bucket deployment copies to, with asset staging disabled', () => {
+    const { templateKeys, sourceKeys } = synthAssetKeys({
+      context: { [cxapi.DISABLE_ASSET_STAGING_CONTEXT]: true },
+      addAssets: (scope) => addLambda(scope, 'Lambda', lambda.Code.fromAsset(path.join(__dirname, 'lambda'))),
+    });
+
+    expectKeysMatchCopiedFileNames(templateKeys, sourceKeys);
+  });
+
+  test('reference the file names the bucket deployment copies to, with bundling skipped', () => {
+    const { templateKeys, sourceKeys } = synthAssetKeys({
+      context: { [cxapi.BUNDLING_STACKS]: [] },
+      addAssets: (scope) => addLambda(scope, 'Lambda', lambda.Code.fromAsset(path.join(__dirname, 'lambda'), {
+        bundling: {
+          image: lambda.Runtime.NODEJS_18_X.bundlingImage,
+          command: ['bash', '-c', 'cp -r /asset-input/. /asset-output'],
+        },
+      })),
+    });
+
+    expectKeysMatchCopiedFileNames(templateKeys, sourceKeys);
+  });
+});
+
+describe('StackSet asset bucket deployment dependencies', () => {
+  function bucketDeploymentIdFor(template: Template, destinationBucketName: string): string {
+    const deployments = template.findResources('Custom::CDKBucketDeployment', {
+      Properties: { DestinationBucketName: destinationBucketName },
+    });
+    const ids = Object.keys(deployments);
+    expect(ids).toHaveLength(1);
+    return ids[0];
+  }
+
+  function dependsOnOf(template: Template, stackSetName: string): string[] {
+    const stackSets = template.findResources('AWS::CloudFormation::StackSet', {
+      Properties: { StackSetName: stackSetName },
+    });
+    const resources = Object.values(stackSets);
+    expect(resources).toHaveLength(1);
+    return resources[0].DependsOn ?? [];
+  }
+
+  test('each StackSet depends only on the bucket deployments of its own template', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const first = new LambdaStackSet(app, 'First', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'FirstBucket', 'first-us-east-1')],
+      assetBucketPrefix: 'first',
+    });
+    const second = new LambdaStackSet(app, 'Second', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'SecondBucket', 'second-us-east-1')],
+      assetBucketPrefix: 'second',
+    });
+
+    new StackSet(stack, 'FirstStackSet', {
+      stackSetName: 'first',
+      deploymentType: DeploymentType.serviceManaged(),
+      template: StackSetTemplate.fromStackSetStack(first),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+    new StackSet(stack, 'SecondStackSet', {
+      stackSetName: 'second',
+      deploymentType: DeploymentType.serviceManaged(),
+      template: StackSetTemplate.fromStackSetStack(second),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+
+    const template = Template.fromStack(stack);
+    const firstDeployment = bucketDeploymentIdFor(template, 'first-us-east-1');
+    const secondDeployment = bucketDeploymentIdFor(template, 'second-us-east-1');
+    const firstDependsOn = dependsOnOf(template, 'first');
+    const secondDependsOn = dependsOnOf(template, 'second');
+
+    expect(firstDependsOn).toContain(firstDeployment);
+    expect(firstDependsOn).not.toContain(secondDeployment);
+    expect(secondDependsOn).toContain(secondDeployment);
+    expect(secondDependsOn).not.toContain(firstDeployment);
+  });
+
+  test('depends on bucket deployments for assets added after the StackSet is created', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const stackSetStack = new StackSetStack(app, 'AssetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'late-us-east-1')],
+      assetBucketPrefix: 'late',
+    });
+
+    new StackSet(stack, 'StackSet', {
+      stackSetName: 'late',
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+    new lambda.Function(stackSetStack, 'Lambda', {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+    });
+
+    const template = Template.fromStack(stack);
+    expect(dependsOnOf(template, 'late')).toContain(bucketDeploymentIdFor(template, 'late-us-east-1'));
+  });
+
+  test('a StackSet in a nested scope depends on the bucket deployments of its template', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const stackSetStack = new LambdaStackSet(app, 'AssetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'nested-us-east-1')],
+      assetBucketPrefix: 'nested',
+    });
+
+    new StackSet(new Construct(stack, 'Group'), 'StackSet', {
+      stackSetName: 'nested',
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+
+    const template = Template.fromStack(stack);
+    expect(dependsOnOf(template, 'nested')).toContain(bucketDeploymentIdFor(template, 'nested-us-east-1'));
+  });
+
+  function stackSetWithImportedAssetBucket() {
+    const app = new App();
+    const stack = new Stack(app);
+    const stackSetStack = new LambdaStackSet(app, 'AssetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'imported-us-east-1')],
+      assetBucketPrefix: 'imported',
+    });
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+    return stack;
+  }
+
+  test('warns on the host stack with an acknowledgeable id when an asset bucket is referenced', () => {
+    const stack = stackSetWithImportedAssetBucket();
+
+    Annotations.fromStack(stack).hasWarning('/Default', Match.stringLikeRegexp(
+      '^Bucket Policy Permissions cannot be added to referenced Bucket.*\\[ack: @aws-cdk/aws-cloudformation:stackSetAssetsBucketPermissions\\]',
+    ));
+  });
+
+  test('the referenced asset bucket warning can be acknowledged on the host stack', () => {
+    const stack = stackSetWithImportedAssetBucket();
+
+    CoreAnnotations.of(stack).acknowledgeWarning('@aws-cdk/aws-cloudformation:stackSetAssetsBucketPermissions');
+
+    Annotations.fromStack(stack).hasNoWarning('*', Match.stringLikeRegexp('Bucket Policy Permissions'));
+  });
+});
+
+describe('StackSet self managed admin role', () => {
+  test('is created within the StackSet scope', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    const stackSet = new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+
+    expect(stackSet.adminRole).toBeDefined();
+    expect(stackSet.node.tryFindChild('AdminRole')).toBe(stackSet.adminRole);
+    expect(stack.node.tryFindChild('AdminRole')).toBeUndefined();
+  });
+
+  test('adminRole is the supplied admin role', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const adminRole = iam.Role.fromRoleArn(stack, 'AdminRole', 'arn:aws:iam::123456789012:role/StackSetAdmin');
+
+    const stackSet = new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+      deploymentType: DeploymentType.selfManaged({ adminRole }),
+    });
+
+    expect(stackSet.adminRole).toBe(adminRole);
+    expect(stackSet.node.tryFindChild('AdminRole')).toBeUndefined();
+  });
+
+  test('two self managed StackSets in one scope each get their own admin role', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    new StackSet(stack, 'First', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'FirstStack')),
+    });
+    new StackSet(stack, 'Second', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'SecondStack')),
+    });
+
+    Template.fromStack(stack).resourceCountIs('AWS::IAM::Role', 2);
+  });
+
+  test('trusts CloudFormation only for StackSets in the same account', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [{
+          Effect: 'Allow',
+          Principal: { Service: 'cloudformation.amazonaws.com' },
+          Action: 'sts:AssumeRole',
+          Condition: {
+            StringEquals: { 'aws:SourceAccount': { Ref: 'AWS::AccountId' } },
+            ArnLike: {
+              'aws:SourceArn': {
+                'Fn::Join': ['', [
+                  'arn:', { Ref: 'AWS::Partition' }, ':cloudformation:*:', { Ref: 'AWS::AccountId' }, ':stackset/*',
+                ]],
+              },
+            },
+          },
+        }],
+      },
+    });
+  });
+
+  test('trust conditions use the partition and account of the stack environment', () => {
+    const app = new App({ context: { [cxapi.ENABLE_PARTITION_LITERALS]: true } });
+    const stack = new Stack(app, 'TestStack', { env: { account: '111111111111', region: 'us-gov-west-1' } });
+
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [{
+          Effect: 'Allow',
+          Principal: { Service: 'cloudformation.amazonaws.com' },
+          Action: 'sts:AssumeRole',
+          Condition: {
+            StringEquals: { 'aws:SourceAccount': '111111111111' },
+            ArnLike: { 'aws:SourceArn': 'arn:aws-us-gov:cloudformation:*:111111111111:stackset/*' },
+          },
+        }],
+      },
+    });
+  });
+
+  test('trust statements for opt-in region principals carry the same conditions', () => {
+    const app = new App({ context: { [cxapi.ENABLE_PARTITION_LITERALS]: true } });
+    const stack = new Stack(app, 'TestStack', { env: { account: '111111111111', region: 'us-east-1' } });
+
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1', 'af-south-1'],
+        accounts: ['11111111111'],
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+    });
+
+    const condition = {
+      StringEquals: { 'aws:SourceAccount': '111111111111' },
+      ArnLike: { 'aws:SourceArn': 'arn:aws:cloudformation:*:111111111111:stackset/*' },
+    };
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [
+          {
+            Effect: 'Allow',
+            Principal: { Service: 'cloudformation.amazonaws.com' },
+            Action: 'sts:AssumeRole',
+            Condition: condition,
+          },
+          {
+            Effect: 'Allow',
+            Principal: { Service: 'cloudformation.af-south-1.amazonaws.com' },
+            Action: 'sts:AssumeRole',
+            Condition: condition,
+          },
+        ],
+      },
+    });
+  });
+
+  test('the trust policy of a supplied admin role gets no conditions added', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const adminRole = new iam.Role(stack, 'CustomAdminRole', {
+      assumedBy: new iam.ServicePrincipal('cloudformation.amazonaws.com'),
+    });
+
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+      deploymentType: DeploymentType.selfManaged({ adminRole }),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [{
+          Effect: 'Allow',
+          Principal: { Service: 'cloudformation.amazonaws.com' },
+          Action: 'sts:AssumeRole',
+          Condition: Match.absent(),
+        }],
+      },
+    });
+  });
+
+  test('a supplied admin role gets the execution role policy and conditioned trust for opt-in regions', () => {
+    const app = new App({ context: { [cxapi.ENABLE_PARTITION_LITERALS]: true } });
+    const stack = new Stack(app, 'TestStack', { env: { account: '111111111111', region: 'us-east-1' } });
+    const adminRole = new iam.Role(stack, 'CustomAdminRole', {
+      assumedBy: new iam.ServicePrincipal('cloudformation.amazonaws.com'),
+    });
+
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1', 'af-south-1'],
+        accounts: ['11111111111'],
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+      deploymentType: DeploymentType.selfManaged({ adminRole }),
+    });
+
+    const template = Template.fromStack(stack);
+    template.resourceCountIs('AWS::IAM::Role', 1);
+    template.hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [
+          {
+            Effect: 'Allow',
+            Principal: { Service: 'cloudformation.amazonaws.com' },
+            Action: 'sts:AssumeRole',
+            Condition: Match.absent(),
+          },
+          {
+            Effect: 'Allow',
+            Principal: { Service: 'cloudformation.af-south-1.amazonaws.com' },
+            Action: 'sts:AssumeRole',
+            Condition: {
+              StringEquals: { 'aws:SourceAccount': '111111111111' },
+              ArnLike: { 'aws:SourceArn': 'arn:aws:cloudformation:*:111111111111:stackset/*' },
+            },
+          },
+        ],
+      },
+    });
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: [{
+          Effect: 'Allow',
+          Action: 'sts:AssumeRole',
+          Resource: 'arn:aws:iam::*:role/AWSCloudFormationStackSetExecutionRole',
+        }],
+      },
+      Roles: [{ Ref: stack.getLogicalId(adminRole.node.defaultChild as iam.CfnRole) }],
+    });
+  });
+
+  test('an imported admin role gets the execution role policy but no trust statements for opt-in regions', () => {
+    const app = new App();
+    const stack = new Stack(app, 'TestStack', { env: { account: '111111111111', region: 'us-east-1' } });
+    const adminRole = iam.Role.fromRoleArn(stack, 'AdminRole', 'arn:aws:iam::111111111111:role/StackSetAdmin');
+
+    new StackSet(stack, 'StackSet', {
+      target: StackSetTarget.fromAccounts({
+        regions: ['us-east-1', 'af-south-1'],
+        accounts: ['11111111111'],
+      }),
+      template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+      deploymentType: DeploymentType.selfManaged({ adminRole }),
+    });
+
+    const template = Template.fromStack(stack);
+    template.resourceCountIs('AWS::IAM::Role', 0);
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      Roles: ['StackSetAdmin'],
+    });
+  });
+});
+
+test('stackSetRef references the StackSet resource', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  const stackSet = new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  expect(stack.resolve(stackSet.stackSetRef.stackSetId)).toEqual({ Ref: 'StackSet6E6355CF' });
+});
+
+test('stackSetId is the StackSetId attribute of the StackSet resource', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  const stackSet = new StackSet(stack, 'StackSet', {
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  expect(stack.resolve(stackSet.stackSetId)).toEqual({ 'Fn::GetAtt': ['StackSet6E6355CF', 'StackSetId'] });
+});
+
+test('a service managed StackSet has no admin role', () => {
+  const app = new App();
+  const stack = new Stack(app);
+
+  const stackSet = new StackSet(stack, 'StackSet', {
+    deploymentType: DeploymentType.serviceManaged(),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  expect(stackSet.adminRole).toBeUndefined();
+});
+
+test('a tokenized target region gets no opt-in region trust statement', () => {
+  const app = new App();
+  const stack = new Stack(app);
+  const region = new CfnParameter(stack, 'TargetRegion').valueAsString;
+
+  new StackSet(stack, 'StackSet', {
+    target: StackSetTarget.fromAccounts({
+      regions: [region],
+      accounts: ['11111111111'],
+    }),
+    template: StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack')),
+  });
+
+  Template.fromStack(stack).hasResourceProperties('AWS::IAM::Role', {
+    AssumeRolePolicyDocument: {
+      Statement: [Match.objectLike({ Principal: { Service: 'cloudformation.amazonaws.com' } })],
+    },
+  });
+});
+
+describe('importing a StackSet', () => {
+  const stackSetId = 'my-stackset:2f0a8b4c-1234-5678-9abc-def012345678';
+
+  test('fromStackSetId returns a StackSet with the given id and no admin role', () => {
+    const stack = new Stack();
+
+    const imported = StackSet.fromStackSetId(stack, 'Imported', stackSetId);
+
+    expect(imported.stackSetId).toEqual(stackSetId);
+    expect(imported.stackSetRef.stackSetId).toEqual(stackSetId);
+    expect(imported).not.toHaveProperty('adminRole');
+  });
+
+  test('fromStackSetArn takes the id, account and region from the ARN', () => {
+    const stack = new Stack();
+
+    const imported = StackSet.fromStackSetArn(stack, 'Imported',
+      `arn:aws:cloudformation:us-west-2:123456789012:stackset/${stackSetId}`);
+
+    expect(imported.stackSetId).toEqual(stackSetId);
+    expect(imported.stackSetRef.stackSetId).toEqual(stackSetId);
+    expect(imported.env).toEqual({ account: '123456789012', region: 'us-west-2' });
+    expect(imported).not.toHaveProperty('adminRole');
+  });
+
+  test('fromStackSetArn resolves the id of a tokenized ARN at deploy time', () => {
+    const stack = new Stack();
+    const stackSetArn = new CfnParameter(stack, 'StackSetArn').valueAsString;
+
+    const imported = StackSet.fromStackSetArn(stack, 'Imported', stackSetArn);
+
+    expect(stack.resolve(imported.stackSetId)).toEqual({
+      'Fn::Select': [1, { 'Fn::Split': [':stackset/', { Ref: 'StackSetArn' }] }],
+    });
+  });
+
+  test('fails when fromStackSetArn gets the ARN of another resource type', () => {
+    const stack = new Stack();
+
+    expect(() => StackSet.fromStackSetArn(stack, 'Imported',
+      'arn:aws:cloudformation:us-west-2:123456789012:stack/my-stack/2f0a8b4c-1234-5678-9abc-def012345678'))
+      .toThrow(/Expected resource type 'stackset' in ARN, got 'stack'/);
+  });
+});
+
+test('fromStackSetStack returns a StackSetTemplate instance', () => {
+  const app = new App();
+
+  const template = StackSetTemplate.fromStackSetStack(new StackSetStack(app, 'Stack'));
+
+  expect(template).toBeInstanceOf(StackSetTemplate);
+});
+
+describe('StackSetTemplate.fromUrl', () => {
+  test('uses the given URL as the template URL', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromUrl('https://s3.amazonaws.com/my-bucket/template.json'),
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+      TemplateURL: 'https://s3.amazonaws.com/my-bucket/template.json',
+    });
+  });
+
+  test('adds no dependencies to a service managed StackSet', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    new StackSet(stack, 'StackSet', {
+      deploymentType: DeploymentType.serviceManaged(),
+      template: StackSetTemplate.fromUrl('https://s3.amazonaws.com/my-bucket/template.json'),
+    });
+
+    Template.fromStack(stack).hasResource('AWS::CloudFormation::StackSet', {
+      DependsOn: Match.absent(),
+    });
+  });
+});
+
+describe('StackSetTemplate.fromAsset', () => {
+  const templatePath = path.join(__dirname, 'stackset-template', 'template.json');
+
+  test('uploads the template as an asset of the StackSet stack', () => {
+    const app = new App();
+    const stack = new Stack(app, 'Admin');
+
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromAsset(templatePath),
+    });
+
+    const assetManifest = JSON.parse(fs.readFileSync(path.join(app.synth().directory, 'Admin.assets.json'), 'utf-8'));
+    const [assetHash] = Object.entries(assetManifest.files)
+      .filter(([, file]: [string, any]) => file.source.path.endsWith('.json') && file.source.packaging === 'file')
+      .map(([hash]) => hash);
+    expect(assetHash).toBeDefined();
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+      TemplateURL: {
+        'Fn::Sub': `https://s3.\${AWS::Region}.\${AWS::URLSuffix}/cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}/${assetHash}.json`,
+      },
+    });
+  });
+
+  test('can be used by several StackSets', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const template = StackSetTemplate.fromAsset(templatePath);
+
+    new StackSet(stack, 'First', { template });
+    new StackSet(stack, 'Second', { template });
+
+    Template.fromStack(stack).resourceCountIs('AWS::CloudFormation::StackSet', 2);
+  });
+});
+
+describe('StackSetStack environment', () => {
+  test('is environment agnostic even when its stage has an environment', () => {
+    const app = new App();
+    const stage = new Stage(app, 'Stage', { env: { account: '111111111111', region: 'us-east-1' } });
+    const host = new Stack(stage, 'Host');
+    const stackSetStack = new StackSetStack(stage, 'StackSetStack');
+    new iam.Role(stackSetStack, 'Role', { assumedBy: new iam.AccountRootPrincipal() });
+
+    new StackSet(host, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+    });
+
+    stackSetTemplateOf(stackSetStack).hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [{
+          Principal: {
+            AWS: { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':iam::', { Ref: 'AWS::AccountId' }, ':root']] },
+          },
+        }],
+      },
+    });
+  });
+});
+
+describe('StackSetStack cross-stack references', () => {
+  test('fails when a StackSetStack references a resource of another stack', () => {
+    const app = new App();
+    const host = new Stack(app, 'Host');
+    const stackSetStack = new StackSetStack(app, 'StackSetStack');
+    const hostRole = new iam.Role(host, 'HostRole', { assumedBy: new iam.AccountRootPrincipal() });
+    new CfnOutput(stackSetStack, 'HostRoleArn', { value: hostRole.roleArn });
+
+    new StackSet(host, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+    });
+
+    expect(() => app.synth()).toThrow(expect.objectContaining({
+      name: 'CrossStackReferenceNotSupported',
+      message: expect.stringContaining('the consumer stack "StackSetStack" does not support cross-stack references'),
+    }));
+  });
+
+  test('fails when another stack references a resource of a StackSetStack', () => {
+    const app = new App();
+    const host = new Stack(app, 'Host');
+    const stackSetStack = new StackSetStack(app, 'StackSetStack');
+    const role = new iam.Role(stackSetStack, 'Role', { assumedBy: new iam.AccountRootPrincipal() });
+    new CfnOutput(host, 'RoleArn', { value: role.roleArn });
+
+    new StackSet(host, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+    });
+
+    expect(() => app.synth()).toThrow(expect.objectContaining({
+      name: 'CrossStackReferenceNotSupported',
+      message: expect.stringContaining('the producer stack "StackSetStack" does not support cross-stack references'),
+    }));
+  });
+});
+
+describe('StackSet validation errors', () => {
+  function templateIn(stack: Stack) {
+    return StackSetTemplate.fromStackSetStack(new StackSetStack(Stage.of(stack)!, 'Stack'));
+  }
+
+  test('fails with an error code when fromAccounts has no accounts', () => {
+    expect(() => StackSetTarget.fromAccounts({ regions: ['us-east-1'], accounts: [] })).toThrow(expect.objectContaining({
+      name: 'StackSetAccountsRequired',
+      message: 'fromAccounts requires at least one account',
+    }));
+  });
+
+  test('fails with an error code when more than one account filter is specified', () => {
+    expect(() => StackSetTarget.fromOrganizationalUnits({
+      regions: ['us-east-1'],
+      organizationalUnits: ['ou-1111111'],
+      additionalAccounts: ['111111111111'],
+      excludeAccounts: ['222222222222'],
+    })).toThrow(expect.objectContaining({
+      name: 'StackSetAccountFiltersMutuallyExclusive',
+      message: "specify at most one of 'additionalAccounts', 'excludeAccounts', or 'intersectionAccounts'",
+    }));
+  });
+
+  test('fails with an error code when autoDeployRetainStacks is set without autoDeploy', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    expect(() => new StackSet(stack, 'StackSet', {
+      deploymentType: DeploymentType.serviceManaged({ autoDeployEnabled: false, autoDeployRetainStacks: true }),
+      template: templateIn(stack),
+    })).toThrow(expect.objectContaining({
+      name: 'StackSetAutoDeployRetainStacksRequiresAutoDeploy',
+      message: 'autoDeployRetainStacks only applies if autoDeploy is enabled',
+      constructPath: 'Default/StackSet',
+    }));
+  });
+
+  test('fails with an error code when a service managed StackSet uses AUTO_EXPAND', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    expect(() => new StackSet(stack, 'StackSet', {
+      deploymentType: DeploymentType.serviceManaged(),
+      capabilities: [CfnCapabilities.AUTO_EXPAND],
+      template: templateIn(stack),
+    })).toThrow(expect.objectContaining({
+      name: 'StackSetAutoExpandNotSupported',
+      message: 'service managed stacksets do not currently support the "AUTO_EXPAND" capability',
+      constructPath: 'Default/StackSet',
+    }));
+  });
+
+  test('fails with an error code when a file asset is used without asset buckets', () => {
+    const app = new App();
+
+    expect(() => new LambdaStackSet(app, 'LambdaStack')).toThrow(expect.objectContaining({
+      name: 'AssetBucketRequired',
+      message: 'an asset bucket must be provided to use file assets, set \'assetBuckets\' in the StackSetStack props',
+      constructPath: 'LambdaStack',
+    }));
+  });
+
+  test('fails with an error code when a file asset is used without an asset bucket prefix', () => {
+    const app = new App();
+    const stack = new Stack(app);
+
+    expect(() => new LambdaStackSet(app, 'LambdaStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'prefix-us-east-1')],
+    })).toThrow(expect.objectContaining({
+      name: 'AssetBucketPrefixRequired',
+      message: 'an asset bucket prefix must be provided to use file assets, set \'assetBucketPrefix\' in the StackSetStack props',
+      constructPath: 'LambdaStack',
+    }));
+  });
+
+  test('fails with an error code when a file asset has no file name', () => {
+    const app = new App();
+    const stack = new Stack(app);
+    const stackSetStack = new StackSetStack(app, 'AssetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'prefix-us-east-1')],
+      assetBucketPrefix: 'prefix',
+    });
+
+    expect(() => stackSetStack.synthesizer.addFileAsset({ sourceHash: 'hash' })).toThrow(expect.objectContaining({
+      name: 'AssetFileNameRequired',
+      message: 'asset filename is undefined',
+      constructPath: 'AssetStack',
+    }));
+  });
+
+  test('fails with an error code when a docker image asset is used', () => {
+    const app = new App();
+    const stackSetStack = new StackSetStack(app, 'AssetStack');
+
+    expect(() => stackSetStack.synthesizer.addDockerImageAsset({ sourceHash: 'hash', directoryName: 'dir' })).toThrow(expect.objectContaining({
+      name: 'DockerAssetsNotSupported',
+      message: 'docker image assets are not supported in StackSet stacks',
+      constructPath: 'AssetStack',
+    }));
+  });
+
+  test.each([
+    ['a Stack', (app: App) => new Stack(app, 'Parent')],
+    ['a construct within a Stack', (app: App) => new Construct(new Stack(app, 'Parent'), 'Group')],
+    ['a NestedStack', (app: App) => new NestedStack(new Stack(app, 'Parent'), 'Nested')],
+    ['a StackSetStack', (app: App) => new StackSetStack(app, 'Parent')],
+  ])('fails with an error code when a StackSetStack is defined inside %s', (_name, parentOf) => {
+    const app = new App();
+    const parent = parentOf(app);
+
+    expect(() => new StackSetStack(parent, 'Stack')).toThrow(expect.objectContaining({
+      name: 'StackSetStackMustBeTopLevel',
+      message: 'a StackSetStack must be defined at the top level of an App or Stage, not inside a Stack',
+    }));
+  });
+
+  test('fails with an error code when a StackSetStack is used by StackSets in two stacks', () => {
+    const app = new App();
+    const stackSetStack = new StackSetStack(app, 'StackSetStack');
+    new StackSet(new Stack(app, 'First'), 'StackSet', { template: StackSetTemplate.fromStackSetStack(stackSetStack) });
+
+    expect(() => new StackSet(new Stack(app, 'Second'), 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+    })).toThrow(expect.objectContaining({
+      name: 'StackSetStackUsedInMultipleStacks',
+      message: 'StackSetStack "StackSetStack" is already used by a StackSet in stack "First", create another StackSetStack for the StackSets in stack "Second"',
+      constructPath: 'Second/StackSet',
+    }));
+  });
+
+  test('fails with an error code when a StackSetStack is used by a StackSet in another Stage', () => {
+    const app = new App();
+    const stackSetStack = new StackSetStack(app, 'StackSetStack');
+    const stack = new Stack(new Stage(app, 'Stage'), 'Admin');
+
+    expect(() => new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+    })).toThrow(expect.objectContaining({
+      name: 'StackSetStackInDifferentStage',
+      message: 'a StackSetStack must be in the same Stage as the StackSets that use it, "StackSetStack" is used by "Stage/Admin/StackSet" in another Stage',
+    }));
+  });
+});
+
+describe('StackSetStack hosted by the stack of its StackSets', () => {
+  function assetManifestOf(app: App, stackName: string) {
+    return JSON.parse(fs.readFileSync(path.join(app.synth().directory, `${stackName}.assets.json`), 'utf-8'));
+  }
+
+  function templateAssetHashes(manifest: any, stackSetStack: StackSetStack): string[] {
+    return Object.entries(manifest.files)
+      .filter(([, file]: [string, any]) => file.source.path === stackSetStack.templateFile)
+      .map(([hash]) => hash);
+  }
+
+  test.each([
+    ['before', true],
+    ['after', false],
+  ])('uploads the template as an asset of the host stack when the StackSetStack is defined %s it', (_name, stackSetStackFirst) => {
+    const app = new App();
+    let stackSetStack: StackSetStack | undefined;
+    if (stackSetStackFirst) {
+      stackSetStack = new StackSetStack(app, 'StackSetStack');
+    }
+    const stack = new Stack(app, 'Admin');
+    stackSetStack = stackSetStack ?? new StackSetStack(app, 'StackSetStack');
+    new StackSet(stack, 'StackSet', { template: StackSetTemplate.fromStackSetStack(stackSetStack) });
+
+    const [templateHash] = templateAssetHashes(assetManifestOf(app, 'Admin'), stackSetStack);
+    expect(templateHash).toBeDefined();
+    Template.fromStack(stack).hasResourceProperties('AWS::CloudFormation::StackSet', {
+      TemplateURL: {
+        'Fn::Sub': `https://s3.\${AWS::Region}.\${AWS::URLSuffix}/cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}/${templateHash}.json`,
+      },
+    });
+  });
+
+  test('StackSets in one stack share the template asset and the asset copies', () => {
+    const app = new App();
+    const stack = new Stack(app, 'Admin');
+    const stackSetStack = new LambdaStackSet(app, 'StackSetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'prefix-us-east-1')],
+      assetBucketPrefix: 'prefix',
+    });
+
+    new StackSet(stack, 'First', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+    new StackSet(stack, 'Second', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+
+    const template = Template.fromStack(stack);
+    template.resourceCountIs('Custom::CDKBucketDeployment', 1);
+    const [first, second] = Object.values(template.findResources('AWS::CloudFormation::StackSet'));
+    expect(first.Properties.TemplateURL).toEqual(second.Properties.TemplateURL);
+    expect(templateAssetHashes(assetManifestOf(app, 'Admin'), stackSetStack)).toHaveLength(1);
+  });
+
+  test('stages the file assets in the host stack', () => {
+    const app = new App();
+    const stack = new Stack(app, 'Admin');
+    const stackSetStack = new LambdaStackSet(app, 'StackSetStack', {
+      assetBuckets: [s3.Bucket.fromBucketName(stack, 'AssetBucket', 'prefix-us-east-1')],
+      assetBucketPrefix: 'prefix',
+    });
+
+    new StackSet(stack, 'StackSet', {
+      template: StackSetTemplate.fromStackSetStack(stackSetStack),
+      capabilities: [CfnCapabilities.ANONYMOUS_IAM],
+    });
+
+    const manifest = assetManifestOf(app, 'Admin');
+    expect(Object.values(manifest.files).some((file: any) => file.source.packaging === 'zip')).toBe(true);
+  });
+
+  test('a StackSetStack that no StackSet uses only writes its template', () => {
+    const app = new App();
+    const stack = new Stack(app, 'Admin');
+    const stackSetStack = new StackSetStack(app, 'StackSetStack');
+
+    const assembly = app.synth();
+
+    expect(fs.existsSync(path.join(assembly.directory, stackSetStack.templateFile))).toBe(true);
+    expect(templateAssetHashes(assetManifestOf(app, stack.artifactId), stackSetStack)).toHaveLength(0);
+    expect(assembly.stacks.map((s) => s.stackName)).toEqual(['Admin']);
+  });
+});
