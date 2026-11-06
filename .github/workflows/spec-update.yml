@@ -1,10 +1,15 @@
 # Stand-in for aws/aws-cdk's AWS Service Spec Update workflow, for the Trellis spec-update-note test on this
-# fork only. It skips the spec build: it uploads a saved PR.md (the one upstream run 41446638827 made on
-# 2026-11-02) and opens or updates the pull request on automation/spec-update as the real workflow does,
-# with the same job name and action, so Trellis sees the same artifact and log line. Started by hand.
+# fork only. It skips the spec build: it uploads the saved PR.md of one upstream run (input `run`, files in
+# .github/spec-update-test/<run>/PR.md) and opens or updates the pull request on automation/spec-update as
+# the real workflow does, with the same job name and action, so Trellis sees the same artifact and log line.
+# Started by hand.
 name: AWS Service Spec Update
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      run:
+        description: The upstream run id whose saved PR.md to use
+        required: true
 jobs:
   pr:
     name: Create Pull Request
@@ -19,7 +24,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: PR.md
-          path: .github/spec-update-test/PR.md
+          path: .github/spec-update-test/${{ inputs.run }}/PR.md
       - name: Make a change
         run: date -u > .github/spec-update-test/last-run.txt
       - name: Make Pull Request
@@ -28,4 +33,4 @@ jobs:
           branch: automation/spec-update
           title: "feat: update L1 CloudFormation resource definitions"
           commit-message: "feat: update L1 CloudFormation resource definitions"
-          body-path: .github/spec-update-test/PR.md
+          body-path: .github/spec-update-test/${{ inputs.run }}/PR.md
