@@ -2,7 +2,8 @@
 # fork only. It skips the spec build: it uploads the saved PR.md of one upstream run (input `run`, files in
 # .github/spec-update-test/<run>/PR.md) and opens or updates the pull request on automation/spec-update as
 # the real workflow does, with the same job name and action, so Trellis sees the same artifact and log line.
-# Started by hand.
+# Like upstream, it uploads the PR number as the pr_info artifact, empty when it made no PR (input `pr`
+# false). Started by hand.
 name: AWS Service Spec Update
 on:
   workflow_dispatch:
@@ -10,6 +11,10 @@ on:
       run:
         description: The upstream run id whose saved PR.md to use
         required: true
+      pr:
+        description: Open or update the pull request (false makes none, as a run with no spec changes)
+        type: boolean
+        default: true
 jobs:
   pr:
     name: Create Pull Request
@@ -26,11 +31,26 @@ jobs:
           name: PR.md
           path: .github/spec-update-test/${{ inputs.run }}/PR.md
       - name: Make a change
+        if: inputs.pr
         run: date -u > .github/spec-update-test/last-run.txt
       - name: Make Pull Request
+        id: create-pr
+        if: inputs.pr
         uses: peter-evans/create-pull-request@v8
         with:
           branch: automation/spec-update
           title: "feat: update L1 CloudFormation resource definitions"
           commit-message: "feat: update L1 CloudFormation resource definitions"
           body-path: .github/spec-update-test/${{ inputs.run }}/PR.md
+      - name: Save PR number
+        env:
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          mkdir -p ${{ runner.temp }}/pr
+          echo "$PR_NUMBER" > ${{ runner.temp }}/pr/pr_number
+      - name: Upload PR number
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr_info
+          path: ${{ runner.temp }}/pr/
+          if-no-files-found: error
